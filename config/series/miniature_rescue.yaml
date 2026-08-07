@@ -1,0 +1,54 @@
+# ミニチュア救助（Tiny World Rescue）。
+# 実例: https://www.youtube.com/shorts/4m---XnpfxI (miniworld.80)
+#       https://www.youtube.com/shorts/8JugFY-9UHw
+#       https://www.youtube.com/shorts/tVIC1zQAcHc
+# 感情フックが強く数千万再生規模の実績。言語非依存。
+
+id: miniature_rescue
+enabled: true
+weight: 1.0
+language_independent: true
+languages: [ja, en]
+description: ミニチュアの村を巨大な人間の手が救う
+
+title_patterns:
+  ja:
+    - "巨大な手がミニチュアの村を救った"
+    - "{disaster}に沈む小さな町を助けてみた"
+    - "小さな世界の{disaster}を止める方法"
+  en:
+    - "Giant hand saves a tiny village from {disaster}"
+    - "Tiny world {disaster} rescue"
+    - "A giant hand helped a tiny world"
+
+hashtags:
+  ja: ["#ミニチュア", "#癒し", "#shorts"]
+  en: ["#miniature", "#satisfying", "#shorts"]
+
+prompt_template: |
+  Hyper-realistic miniature diorama, vertical 9:16, macro lens, shallow depth of field.
+  {scene}
+  A realistic full-size human hand enters the frame to help.
+  Warm practical lighting, tactile materials, tilt-shift realism.
+  No text overlay, no watermark, no logos.
+
+subject_pool:
+  - a flooded miniature farming village
+  - a tiny wooden bridge cracked in half
+  - a miniature house with a collapsed roof
+  - a small village cut off by a mudslide
+  - a tiny harbour hit by a storm surge
+  - a miniature power line brought down by wind
+  - a small greenhouse buried in snow
+
+banned:
+  - ミニチュアの人形が負傷・死亡する描写
+  - 実在の災害・被災地の再現
+  - 実在ブランド・ロゴ
+
+video:
+  model: veo-3.1-lite-generate-preview
+  duration_seconds: 8
+  aspect_ratio: "9:16"
+  resolution: "720p"
+  generate_audio: true

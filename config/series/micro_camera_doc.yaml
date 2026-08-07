@@ -1,0 +1,56 @@
+# マイクロカメラ動物ドキュメンタリー。
+# 実例: https://www.youtube.com/shorts/irLPvLEeutA
+#       https://www.youtube.com/shorts/fVyifrgrG9U
+#       https://www.youtube.com/shorts/l71xWbde4NI
+# 2026年2月開設のチャンネルが登録1.2万で14.5M再生という実績あり。
+# 完全に言語非依存で ja/en 両方へ同じ素材を回せる。教養寄りなので審査に強い。
+
+id: micro_camera_doc
+enabled: true
+weight: 1.0
+language_independent: true
+languages: [ja, en]
+description: 超小型カメラを生き物に付けた体のフェイク自然ドキュメンタリー
+
+title_patterns:
+  ja:
+    - "{creature}の巣の中に超小型カメラを入れてみた"
+    - "誰も見たことがない{creature}の地下世界"
+    - "{creature}の視点で見た世界がすごい"
+  en:
+    - "I mounted a micro camera on a {creature}"
+    - "Inside a {creature} colony | Micro Camera POV"
+    - "What a {creature} actually sees"
+
+hashtags:
+  ja: ["#生き物", "#観察", "#shorts"]
+  en: ["#nature", "#pov", "#shorts"]
+
+prompt_template: |
+  Raw micro-camera documentary footage, vertical 9:16, no cinematic grading.
+  {scene}
+  Extremely close macro perspective, natural available light only,
+  slight lens dirt and vignetting, wildlife-camera realism.
+  No text overlay, no watermark, no logos, no narration.
+
+subject_pool:
+  - a leafcutter ant carrying a leaf fragment
+  - a trapdoor spider at its burrow entrance
+  - a mole tunnelling through soil
+  - a hedgehog entering a leaf nest
+  - a scorpion under a rock at night
+  - a termite in a mound corridor
+  - a hermit crab inside its shell
+  - a bumblebee inside a nest cavity
+
+banned:
+  - 動物の負傷・流血・捕食の生々しい描写
+  - 実在の研究機関名・ブランド名
+  - 本物の撮影であると明示する断定表現
+
+video:
+  model: veo-3.1-lite-generate-preview
+  duration_seconds: 8
+  aspect_ratio: "9:16"
+  resolution: "720p"
+  generate_audio: true

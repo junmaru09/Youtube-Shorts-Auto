@@ -1,0 +1,23 @@
+# 投稿先チャンネル。token_path は OAuth トークン JSON の置き場所。
+# この Codespace は非対話なので、ローカルで `shorts-auto auth --channel ja` を通して
+# 生成した JSON を持ち込む（README 参照）。
+
+channels:
+  - id: ja
+    name: 日本語チャンネル
+    language: ja
+    token_path: config/oauth/token_ja.json
+    default_tags: ["shorts", "AI"]
+    description_footer: |
+      この動画は生成AIで制作しています。
+
+  - id: en
+    name: English channel
+    language: en
+    token_path: config/oauth/token_en.json
+    default_tags: ["shorts", "ai"]
+    description_footer: |
+      This video was created with generative AI.
+
+# OAuth クライアントシークレット（Google Cloud Console からダウンロード）
+client_secret_path: config/oauth/client_secret.json

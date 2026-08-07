@@ -1,0 +1,62 @@
+# 方針C（小規模実験）の既定値。
+# 「当たりが見えたら拡大、見えなければ数万円で止める」ための上限をここで強制する。
+
+budget:
+  # 月次の生成コスト上限（USD）。超えると generate が拒否される。
+  monthly_usd: 75.0
+  # 1回の generate 実行で使ってよい上限（USD）。暴走時のブレーキ。
+  per_run_usd: 5.0
+
+pipeline:
+  # 1日に企画する本数
+  ideas_per_day: 3
+  # 1日に投稿する本数。YouTube Data API は 10,000 units/日 かつ
+  # videos.insert = 1600 units なので物理上限は 6 本/日。
+  publish_per_day: 3
+  # 生成失敗・レビュー却下時に同一企画を再生成してよい回数
+  max_retries_per_idea: 2
+
+video:
+  # 既定バックエンド。backends/ の登録名。
+  backend: veo
+  model: veo-3.1-lite-generate-preview
+  duration_seconds: 8
+  aspect_ratio: "9:16"
+  resolution: "720p"
+  generate_audio: true
+  # Veo が焼き込みがちな要素を抑制する共通ネガティブプロンプト
+  negative_prompt: "text overlay, subtitles, watermark, logo, blurry, low quality, distorted anatomy"
+
+llm:
+  # 企画生成に使うモデル
+  model: claude-sonnet-5
+  max_tokens: 4096
+  # 直近この件数の企画を「重複を避けろ」の参考として LLM に渡す
+  recent_context_size: 40
+
+review:
+  # 却下理由タグ。Streamlit のボタンと LLM へのフィードバックに使う。
+  reason_tags:
+    - 映像が破綻している
+    - フックが弱い
+    - 既出と似すぎ
+    - ポリシー的に危ない
+    - 音声が不自然
+
+publish:
+  # EU AI Act（2026年8月〜）と YouTube の開示要件。常に true。
+  disclose_synthetic_media: true
+  # 最初は必ず private で上げ、目視確認後に public へ切り替える
+  initial_privacy: private
+  category_id: "24" # Entertainment
+
+report:
+  # 収益化ライン: 直近90日で 1,000万ショート再生
+  monetization_views_90d: 10000000
+  # 損益分岐の判定に使う RPM レンジ（USD / 1,000 views）
+  rpm_low: 0.03
+  rpm_high: 0.10
+  # 各シリーズがこの本数に達するまでは配分を均等にする（探索優先）
+  min_samples_before_weighting: 10
+  # 全シリーズに保証する最低配分
+  min_weight_share: 0.15

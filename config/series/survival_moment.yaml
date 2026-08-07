@@ -1,0 +1,56 @@
+# 危機一髪・生存本能系。参照動画のジャンル。
+# 実例: https://www.youtube.com/shorts/kHwpZcPRYpE (@sewabanashi)
+#       https://www.youtube.com/shorts/aoXApYLDO6k (ミステリー劇場)
+#       https://www.youtube.com/shorts/VCGk1Minkjc
+# 日本語圏ではすでにかなり飽和している。生成コスト最小のベースラインとして置く。
+
+id: survival_moment
+enabled: true
+weight: 1.0
+language_independent: true
+languages: [ja, en]
+description: ハイパーリアルな1カットで「間一髪の瞬間」を見せる
+
+title_patterns:
+  ja:
+    - "{subject}が{action}した瞬間"
+    - "絶対に{noun}を疑ってはいけない"
+    - "己の{noun}を信じた{subject}"
+    - "{subject}の生き残り方が異常"
+  en:
+    - "The moment {subject} {action}"
+    - "Never doubt {noun}"
+    - "How {subject} survived"
+
+hashtags:
+  ja: ["#すごい", "#おもしろ", "#shorts"]
+  en: ["#shorts", "#wow", "#closecall"]
+
+prompt_template: |
+  Hyper-realistic handheld amateur footage, vertical 9:16, shot on a phone.
+  {scene}
+  Natural available light, slight camera shake, documentary realism.
+  No text overlay, no watermark, no logos, no on-screen graphics.
+
+subject_pool:
+  - a mountain goat on a cliff face
+  - a driver on a flooding road
+  - a hiker crossing a rope bridge
+  - a deer on a frozen lake
+  - a cyclist on a mountain switchback
+  - a fisherman in a sudden swell
+  - a climber on a crumbling ledge
+  - a bird caught in a downdraft
+
+banned:
+  - 動物や人の負傷・流血の描写
+  - 実在人物・実在事件の再現
+  - 実在ブランド・ロゴ・ナンバープレート
+  - 実際の死亡や重傷を示唆する結末
+
+video:
+  model: veo-3.1-lite-generate-preview
+  duration_seconds: 8
+  aspect_ratio: "9:16"
+  resolution: "720p"
+  generate_audio: true
