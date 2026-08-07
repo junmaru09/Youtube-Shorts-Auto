@@ -25,11 +25,10 @@ class VeoBackend:
     name = "veo"
 
     def __init__(self, api_key: str | None = None) -> None:
-        self._api_key = api_key or os.environ.get("GEMINI_API_KEY")
-        if not self._api_key:
-            raise RuntimeError(
-                "GEMINI_API_KEY is not set. Copy .env.example to .env and fill it in."
-            )
+        # Credentials are resolved lazily: pricing and budget checks must work
+        # without them, so a spent budget reports "budget exhausted" rather
+        # than a misleading "no API key".
+        self._api_key = api_key
         self._client = None
 
     @property
@@ -37,7 +36,12 @@ class VeoBackend:
         if self._client is None:
             from google import genai
 
-            self._client = genai.Client(api_key=self._api_key)
+            key = self._api_key or os.environ.get("GEMINI_API_KEY")
+            if not key:
+                raise RuntimeError(
+                    "GEMINI_API_KEY is not set. Copy .env.example to .env and fill it in."
+                )
+            self._client = genai.Client(api_key=key)
         return self._client
 
     def estimate_cost(self, request: VideoRequest) -> float:

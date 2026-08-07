@@ -40,13 +40,17 @@ CREATE TABLE IF NOT EXISTS assets (
     created_at  TEXT    NOT NULL
 );
 
+-- Reviews sit at the idea level, not the asset level: the ja and en renders
+-- are the same footage with different burned-in text, so judging them
+-- separately would just ask the reviewer the same question twice.
 CREATE TABLE IF NOT EXISTS reviews (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    asset_id    INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+    idea_id     INTEGER NOT NULL REFERENCES ideas(id) ON DELETE CASCADE,
     decision    TEXT    NOT NULL,
     reason_tag  TEXT,
     note        TEXT,
-    reviewed_at TEXT    NOT NULL
+    reviewed_at TEXT    NOT NULL,
+    UNIQUE (idea_id)
 );
 
 CREATE TABLE IF NOT EXISTS posts (
@@ -175,8 +179,7 @@ def recent_rejections(conn: sqlite3.Connection, series_id: str, limit: int) -> l
         """
         SELECT i.scene_summary, i.hook_json, r.reason_tag, r.note
         FROM reviews r
-        JOIN assets a ON a.id = r.asset_id
-        JOIN ideas  i ON i.id = a.idea_id
+        JOIN ideas i ON i.id = r.idea_id
         WHERE r.decision = 'reject' AND i.series_id = ?
         ORDER BY r.id DESC LIMIT ?
         """,
@@ -237,30 +240,53 @@ def spend_since(conn: sqlite3.Connection, iso_timestamp: str) -> float:
 def insert_review(
     conn: sqlite3.Connection,
     *,
-    asset_id: int,
+    idea_id: int,
     decision: str,
     reason_tag: str | None = None,
     note: str | None = None,
 ) -> int:
+    """Record a human decision. Re-deciding an idea overwrites the previous call."""
     cursor = conn.execute(
-        "INSERT INTO reviews (asset_id, decision, reason_tag, note, reviewed_at) VALUES (?, ?, ?, ?, ?)",
-        (asset_id, decision, reason_tag, note, now()),
+        """
+        INSERT INTO reviews (idea_id, decision, reason_tag, note, reviewed_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(idea_id) DO UPDATE SET
+            decision = excluded.decision,
+            reason_tag = excluded.reason_tag,
+            note = excluded.note,
+            reviewed_at = excluded.reviewed_at
+        """,
+        (idea_id, decision, reason_tag, note, now()),
     )
     return int(cursor.lastrowid)
 
 
-def pending_review_assets(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    """Post-processed assets that nobody has decided on yet."""
+def pending_reviews(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Post-processed ideas that nobody has decided on yet."""
     return conn.execute(
         """
-        SELECT a.*, i.series_id, i.hook_json, i.scene_summary, i.status AS idea_status
-        FROM assets a
-        JOIN ideas i ON i.id = a.idea_id
-        LEFT JOIN reviews r ON r.asset_id = a.id
+        SELECT i.*
+        FROM ideas i
+        LEFT JOIN reviews r ON r.idea_id = i.id
         WHERE i.status = 'post_processed' AND r.id IS NULL
-        ORDER BY a.id
+        ORDER BY i.id
         """
     ).fetchall()
+
+
+def update_hook(conn: sqlite3.Connection, idea_id: int, hook: dict[str, str]) -> None:
+    """Reviewer edited a title. Renders must be redone to pick up the new text."""
+    conn.execute(
+        "UPDATE ideas SET hook_json = ? WHERE id = ?",
+        (json.dumps(hook, ensure_ascii=False), idea_id),
+    )
+
+
+def delete_assets_for_idea(conn: sqlite3.Connection, idea_id: int, lang: str | None = None) -> None:
+    if lang is None:
+        conn.execute("DELETE FROM assets WHERE idea_id = ?", (idea_id,))
+    else:
+        conn.execute("DELETE FROM assets WHERE idea_id = ? AND lang = ?", (idea_id, lang))
 
 
 # --- posts & stats -----------------------------------------------------------
@@ -283,6 +309,21 @@ def insert_post(
         (asset_id, channel_id, youtube_video_id, title, privacy, now()),
     )
     return int(cursor.lastrowid)
+
+
+def publishable_assets(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Rendered variants of approved ideas that have not been uploaded yet."""
+    return conn.execute(
+        """
+        SELECT a.*, i.series_id, i.hook_json, i.tags_json, i.scene_summary
+        FROM assets a
+        JOIN ideas i ON i.id = a.idea_id
+        WHERE i.status = 'approved'
+          AND a.lang <> 'src'
+          AND NOT EXISTS (SELECT 1 FROM posts p WHERE p.asset_id = a.id)
+        ORDER BY a.idea_id, a.lang
+        """
+    ).fetchall()
 
 
 def posts_published_since(conn: sqlite3.Connection, iso_timestamp: str) -> int:

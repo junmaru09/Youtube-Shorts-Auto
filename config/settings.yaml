@@ -34,6 +34,13 @@ llm:
   # 直近この件数の企画を「重複を避けろ」の参考として LLM に渡す
   recent_context_size: 40
 
+postprocess:
+  # タイトル焼き込み用フォント。未設定なら Noto Sans CJK を自動検出する。
+  font_path: null
+  font_size: 64
+  # ラウドネス正規化のターゲット（LUFS）。YouTube の基準に合わせる。
+  loudness_target: -14.0
+
 review:
   # 却下理由タグ。Streamlit のボタンと LLM へのフィードバックに使う。
   reason_tags:
@@ -58,5 +65,7 @@ report:
   rpm_high: 0.10
   # 各シリーズがこの本数に達するまでは配分を均等にする（探索優先）
   min_samples_before_weighting: 10
-  # 全シリーズに保証する最低配分
+  # 全シリーズに保証する最低配分。ただし合計が予算の半分を超えないよう
+  # 0.5/シリーズ数 で自動的に頭打ちになる（5シリーズなら実効10%）。
+  # これがないと 0.15 x 5 = 75% が固定され、実績で動かせる余地がほぼ無くなる。
   min_weight_share: 0.15

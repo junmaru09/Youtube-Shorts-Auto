@@ -3,11 +3,15 @@
 Each series is one arm. Until every arm has enough samples the split stays
 uniform — with three data points per genre any weighting is noise, and the
 whole point of policy C is to buy a trustworthy read, not to converge fast.
+
+Scoring is linear in views on purpose. Shorts revenue is linear in views and
+the view distribution is long-tailed, so the genre worth backing is the one
+that produces occasional huge hits — not the one with the best median. A log
+score would compress exactly the signal that decides the outcome.
 """
 
 from __future__ import annotations
 
-import math
 import sqlite3
 from collections import defaultdict
 
@@ -19,11 +23,17 @@ def _report_cfg() -> dict:
 
 
 def series_scores(conn: sqlite3.Connection, window: str = "72h") -> dict[str, list[float]]:
-    """Per-series list of per-video scores: log1p(views) * retention."""
+    """Per-series list of per-video scores: views discounted by retention.
+
+    Retention is a straight multiplier — views that people swipe away from
+    still count for revenue, but they are worth less to the recommender, so a
+    video is scored on views it held rather than views it was served.
+    """
     scores: dict[str, list[float]] = defaultdict(list)
     for row in db.series_stats(conn, window=window):
+        # Missing retention (Analytics scope unavailable) must not zero the arm.
         retention = float(row["avg_view_pct"]) or 1.0
-        scores[row["series_id"]].append(math.log1p(float(row["views"])) * retention)
+        scores[row["series_id"]].append(float(row["views"]) * retention)
     return dict(scores)
 
 
@@ -44,10 +54,6 @@ def compute_allocation(
     n = len(series_ids)
     uniform = {sid: 1.0 / n for sid in series_ids}
 
-    # A floor that cannot fit means the caller misconfigured min_weight_share.
-    if min_share * n >= 1.0:
-        return uniform
-
     # Explore first: any under-sampled arm keeps the whole split uniform.
     if any(len(scores.get(sid, [])) < min_samples for sid in series_ids):
         return uniform
@@ -57,8 +63,12 @@ def compute_allocation(
     if total <= 0:
         return uniform
 
-    free = 1.0 - min_share * n
-    return {sid: min_share + free * (means[sid] / total) for sid in series_ids}
+    # Cap the floor so at most half the budget is locked up regardless of how
+    # many arms exist. With five series a naive 15% floor would reserve 75%,
+    # leaving the results almost no room to steer anything.
+    effective_floor = min(min_share, 0.5 / n)
+    free = 1.0 - effective_floor * n
+    return {sid: effective_floor + free * (means[sid] / total) for sid in series_ids}
 
 
 def allocation(window: str = "72h") -> dict[str, float]:

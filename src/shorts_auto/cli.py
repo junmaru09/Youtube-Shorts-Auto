@@ -104,9 +104,8 @@ def cmd_publish(args: argparse.Namespace) -> int:
     from .stages import publish
 
     result = publish.run(limit=args.limit, privacy=args.privacy, dry_run=args.dry_run)
-    print(
-        f"publish: {result.published} uploaded, {result.skipped} skipped, {result.failed} failed"
-    )
+    verb = "would upload" if args.dry_run else "uploaded"
+    print(f"publish: {result.published} {verb}, {result.skipped} skipped, {result.failed} failed")
     for line in result.notes:
         print(f"  {line}")
     return 0 if result.failed == 0 else 1
