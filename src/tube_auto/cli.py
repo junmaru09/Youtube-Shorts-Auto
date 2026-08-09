@@ -1,17 +1,22 @@
 """Command line entry point.
 
-Daily loop:
+The daily loop:
 
     tube-auto doctor        is anything misconfigured?
     tube-auto status        what state is everything in, and what is next?
-    tube-auto ideate        plan videos
-    tube-auto generate      turn plans into mp4 files (this costs money)
-    tube-auto postprocess   normalise, burn the title, cut a thumbnail
-    streamlit run review_app.py   approve or reject
+    tube-auto research      choose a topic and gather its primary sources
+    tube-auto script        write it, with every number cited
+    tube-auto narrate       synthesise the audio and learn the real timings
+    tube-auto footage       pull NASA material for the timeline
+    tube-auto diagrams      draw the figures NASA does not have
+    tube-auto assemble      cut it together
+    streamlit run review_app.py   watch it and approve
     tube-auto publish       upload as private
-    tube-auto go-live       make them visible (nothing is measured until this)
+    tube-auto go-live       make it visible (nothing is measured until this)
     tube-auto sync-stats    pull view counts back in
     tube-auto report        the numbers that decide expand-or-stop
+
+`tube-auto build` runs research through assemble in one go.
 """
 
 from __future__ import annotations
@@ -19,7 +24,6 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from pathlib import Path
 
 from . import config, db, paths
 
@@ -69,6 +73,21 @@ def _positive(value: str) -> int:
     return number
 
 
+def _report(name: str, result, *, errors_attr: str = "errors") -> int:
+    """Print a stage result the same way for every stage."""
+    fields = {
+        f: getattr(result, f)
+        for f in result.__slots__
+        if f not in (errors_attr, "details", "topics")
+    }
+    summary = ", ".join(f"{k}={v}" for k, v in fields.items())
+    print(f"{name}: {summary}")
+    problems = getattr(result, errors_attr, [])
+    for problem in problems:
+        print(f"  ! {problem}", file=sys.stderr)
+    return 0 if not problems else 1
+
+
 # --- commands ----------------------------------------------------------------
 
 
@@ -82,7 +101,7 @@ def cmd_init(args: argparse.Namespace) -> int:
             print(f"  ! {problem}")
         return 1
     arms = config.arms(include_disabled=True)
-    print(f"{len(config.load_series(include_disabled=True))} series, {len(arms)} A/B arms:")
+    print(f"{len(config.load_themes(include_disabled=True))} themes, {len(arms)} A/B arms:")
     for arm in arms:
         print(f"  {arm.key}")
     return 0
@@ -97,111 +116,169 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
+    from .models import IDEA_STATUSES
     from .scoring import allocation
 
     with db.session() as conn:
         counts = db.status_counts(conn)
         private = len(db.private_posts(conn))
         live = len(db.measurable_posts(conn))
-        pending_review = len(db.pending_reviews(conn))
+        pending = len(db.pending_reviews(conn))
 
     print("\nパイプラインの状態")
-    print("=" * 60)
-    order = ["ideated", "generated", "post_processed", "approved", "rejected",
-             "published", "live", "failed"]
-    for status in order:
+    print("=" * 62)
+    for status in IDEA_STATUSES:
         if counts.get(status):
             print(f"  {status:<16} {counts[status]:>4}")
-    print(f"  {'レビュー待ち':<16} {pending_review:>4}")
+    print(f"  {'レビュー待ち':<16} {pending:>4}")
     print(f"  {'private のまま':<16} {private:>4}")
     print(f"  {'公開済み':<16} {live:>4}")
 
     print("\n次にやること")
-    print("=" * 60)
-    if counts.get("ideated"):
-        print(f"  tube-auto generate       ({counts['ideated']} 件の企画が生成待ち)")
-    if counts.get("generated"):
-        print(f"  tube-auto postprocess    ({counts['generated']} 件が後処理待ち)")
-    if pending_review:
-        print(f"  streamlit run review_app.py ({pending_review} 件がレビュー待ち)")
-    if counts.get("approved"):
-        print(f"  tube-auto publish        ({counts['approved']} 件が投稿待ち)")
+    print("=" * 62)
+    nexts = [
+        ("researched", "tube-auto script", "台本待ち"),
+        ("scripted", "tube-auto narrate", "音声待ち"),
+        ("narrated", "tube-auto footage", "素材待ち"),
+        ("sourced", "tube-auto diagrams && tube-auto assemble", "図解・合成待ち"),
+        ("approved", "tube-auto publish", "投稿待ち"),
+    ]
+    printed = False
+    for status, command, label in nexts:
+        if counts.get(status):
+            print(f"  {command:<42} ({counts[status]} 件 {label})")
+            printed = True
+    if pending:
+        print(f"  {'streamlit run review_app.py':<42} ({pending} 件がレビュー待ち)")
+        printed = True
     if private:
-        print(f"  tube-auto go-live        ({private} 件が private のまま = 再生されない)")
+        print(f"  {'tube-auto go-live':<42} ({private} 件が private = 再生されない)")
+        printed = True
     if live:
-        print("  tube-auto sync-stats     (再生数を取り込む。毎日実行)")
-    if not any([counts.get("ideated"), counts.get("generated"), pending_review,
-                counts.get("approved"), private]):
-        print("  tube-auto ideate         (キューが空です)")
+        print(f"  {'tube-auto sync-stats':<42} (毎日実行)")
+        printed = True
+    if not printed:
+        print("  tube-auto research                         (キューが空です)")
 
     print("\n現在の配分")
-    print("=" * 60)
+    print("=" * 62)
     for key, share in sorted(allocation().items(), key=lambda kv: -kv[1]):
-        print(f"  {key:<28} {share:>6.1%}")
+        print(f"  {key:<30} {share:>6.1%}")
     print()
     return 0
 
 
-def cmd_series(args: argparse.Namespace) -> int:
+def cmd_themes(args: argparse.Namespace) -> int:
     from .scoring import allocation
 
     shares = allocation()
-    for entry in config.load_series(include_disabled=True):
-        state = "on " if entry.enabled else "off"
-        print(f"[{state}] {entry.id:<20} {entry.description}")
-        for lang in entry.languages:
-            key = f"{entry.id}:{lang}"
+    for theme in config.load_themes(include_disabled=True):
+        state = "on " if theme.enabled else "off"
+        print(f"[{state}] {theme.id:<16} {theme.description}")
+        for lang in theme.languages:
+            key = f"{theme.id}:{lang}"
             print(f"        {key:<26} share={shares.get(key, 0.0):>6.1%}")
     return 0
 
 
-def cmd_ideate(args: argparse.Namespace) -> int:
-    from .stages import ideate
+def cmd_research(args: argparse.Namespace) -> int:
+    from .stages import research
 
-    result = ideate.run(
-        count=args.count, dry_run=args.dry_run, series_id=args.series, lang=args.lang
-    )
+    result = research.run(count=args.count, theme_id=args.theme, dry_run=args.dry_run)
     print(
-        f"ideate: {result.inserted} new, {result.duplicates} duplicates dropped, "
-        f"{result.failed} failed (LLM cost ${result.llm_cost_usd:.4f})"
+        f"research: {result.created} planned, {result.duplicates} duplicates, "
+        f"{result.failed} failed (LLM ${result.llm_cost_usd:.4f})"
     )
-    for idea in result.ideas:
-        print(f"  [{idea['series_id']}:{idea['lang']}] {idea['hook']}")
-    for error in result.errors:
-        print(f"  ! {error}", file=sys.stderr)
-    return 0 if result.inserted else 1
+    for topic in result.topics:
+        print(f"  [{topic['series_id']}] {topic['hook']}")
+        for source in topic.get("sources", []):
+            print(f"      [{source['ref']}] {source['title'][:64]}")
+    for problem in result.errors:
+        print(f"  ! {problem}", file=sys.stderr)
+    return 0 if result.created else 1
 
 
-def cmd_generate(args: argparse.Namespace) -> int:
-    from .stages import generate
+def cmd_script(args: argparse.Namespace) -> int:
+    from .stages import script
 
-    if args.prompt or args.prompt_file:
-        prompt = args.prompt or Path(args.prompt_file).read_text(encoding="utf-8").strip()
-        output = Path(args.output or paths.ASSETS_DIR / "adhoc.mp4")
-        cost = generate.generate_one(
-            prompt, output, backend_name=args.backend, dry_run=args.dry_run
-        )
-        print(f"wrote {output} (${cost:.2f})")
-        return 0
-
-    result = generate.run(limit=args.limit, backend_name=args.backend, dry_run=args.dry_run)
+    result = script.run(limit=args.limit, idea_id=args.idea, dry_run=args.dry_run)
     print(
-        f"generate: {result.generated} ok, {result.failed} failed, "
-        f"{result.skipped_budget} skipped for budget, ${result.spent_usd:.2f} spent"
+        f"script: {result.written} written, {result.rejected} rejected "
+        f"(LLM ${result.llm_cost_usd:.4f})"
     )
-    for error in result.errors:
-        print(f"  ! {error}", file=sys.stderr)
+    for detail in result.details:
+        print(f"  idea {detail['idea_id']}: {detail['chars']} chars (~{detail['chars'] / 400:.1f} min)")
+        for index, hook in enumerate(detail.get("hooks", []), start=1):
+            print(f"      冒頭案{index}: {hook}")
+    for problem in result.errors:
+        print(f"  ! {problem}", file=sys.stderr)
+    return 0 if result.written else 1
+
+
+def cmd_narrate(args: argparse.Namespace) -> int:
+    from .stages import narrate
+
+    result = narrate.run(limit=args.limit, idea_id=args.idea, provider=args.provider)
+    print(f"narrate: {result.narrated} narrated, {result.failed} failed, {result.chars:,} chars")
+    for detail in result.details:
+        print(f"  idea {detail['idea_id']}: {detail['duration_s'] / 60:.1f} min")
+    for problem in result.errors:
+        print(f"  ! {problem}", file=sys.stderr)
     return 0 if result.failed == 0 else 1
 
 
-def cmd_postprocess(args: argparse.Namespace) -> int:
-    from .stages import postprocess
+def cmd_footage(args: argparse.Namespace) -> int:
+    from .stages import footage
 
-    result = postprocess.run(limit=args.limit)
-    print(f"postprocess: {result.processed} rendered, {result.failed} failed")
-    for error in result.errors:
-        print(f"  ! {error}", file=sys.stderr)
+    result = footage.run(limit=args.limit, idea_id=args.idea)
+    print(
+        f"footage: {result.sourced} sourced, {result.clips} clips, {result.stills} stills, "
+        f"{result.covered_ratio:.0%} of the timeline covered"
+    )
+    for problem in result.errors:
+        print(f"  ! {problem}", file=sys.stderr)
     return 0 if result.failed == 0 else 1
+
+
+def cmd_diagrams(args: argparse.Namespace) -> int:
+    from .stages import diagrams
+
+    result = diagrams.run(limit=args.limit, idea_id=args.idea)
+    print(f"diagrams: {result.drawn} drawn across {result.ideas} idea(s), {result.failed} failed")
+    for problem in result.errors:
+        print(f"  ! {problem}", file=sys.stderr)
+    return 0 if result.failed == 0 else 1
+
+
+def cmd_assemble(args: argparse.Namespace) -> int:
+    from .stages import assemble
+
+    result = assemble.run(limit=args.limit, idea_id=args.idea)
+    print(f"assemble: {result.assembled} assembled, {result.failed} failed")
+    for detail in result.details:
+        print(f"  idea {detail['idea_id']}: {detail['duration_s'] / 60:.1f} min -> {detail['path']}")
+    for problem in result.errors:
+        print(f"  ! {problem}", file=sys.stderr)
+    return 0 if result.failed == 0 else 1
+
+
+def cmd_build(args: argparse.Namespace) -> int:
+    """Research through assemble, stopping at the first stage that produces nothing."""
+    steps = [
+        ("research", lambda: cmd_research(argparse.Namespace(count=1, theme=args.theme, dry_run=False))),
+        ("script", lambda: cmd_script(argparse.Namespace(limit=1, idea=None, dry_run=False))),
+        ("narrate", lambda: cmd_narrate(argparse.Namespace(limit=1, idea=None, provider=args.provider))),
+        ("footage", lambda: cmd_footage(argparse.Namespace(limit=1, idea=None))),
+        ("diagrams", lambda: cmd_diagrams(argparse.Namespace(limit=1, idea=None))),
+        ("assemble", lambda: cmd_assemble(argparse.Namespace(limit=1, idea=None))),
+    ]
+    for name, step in steps:
+        print(f"\n=== {name} ===")
+        code = step()
+        if code != 0:
+            print(f"\nbuild stopped at {name}", file=sys.stderr)
+            return code
+    return 0
 
 
 def cmd_publish(args: argparse.Namespace) -> int:
@@ -236,8 +313,8 @@ def cmd_sync_stats(args: argparse.Namespace) -> int:
         for item in result.missed[:10]:
             print(f"    {item}")
         print("    run sync-stats daily; an expired window cannot be reconstructed")
-    for error in result.errors:
-        print(f"  ! {error}", file=sys.stderr)
+    for problem in result.errors:
+        print(f"  ! {problem}", file=sys.stderr)
     return 0 if not result.errors else 1
 
 
@@ -251,17 +328,19 @@ def cmd_report(args: argparse.Namespace) -> int:
 def cmd_gc(args: argparse.Namespace) -> int:
     """Delete work files no database row refers to."""
     with db.session() as conn:
-        keep = {row["path"] for row in conn.execute("SELECT path FROM generations WHERE path IS NOT NULL")}
+        keep = {row["path"] for row in conn.execute("SELECT path FROM assets WHERE path <> ''")}
         keep |= {row["path"] for row in conn.execute("SELECT path FROM renders")}
         keep |= {
             row["thumb_path"]
             for row in conn.execute("SELECT thumb_path FROM renders WHERE thumb_path IS NOT NULL")
         }
+        keep |= {row["path"] for row in conn.execute("SELECT path FROM narrations")}
         keep |= {row["path"] for row in conn.execute("SELECT path FROM posts WHERE path <> ''")}
 
     removed, freed = 0, 0
-    for directory in (paths.ASSETS_DIR, paths.RENDERS_DIR, paths.THUMBS_DIR):
-        for path in directory.glob("*"):
+    for directory in (paths.FOOTAGE_DIR, paths.STILLS_DIR, paths.DIAGRAMS_DIR,
+                      paths.AUDIO_DIR, paths.RENDERS_DIR, paths.THUMBS_DIR):
+        for path in directory.rglob("*"):
             if not path.is_file() or str(path) in keep:
                 continue
             freed += path.stat().st_size
@@ -292,76 +371,90 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-v", "--verbose", action="store_true")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("init", help="create the database and validate config").set_defaults(
-        func=cmd_init
-    )
+    sub.add_parser("init", help="create the database and validate config").set_defaults(func=cmd_init)
     sub.add_parser("doctor", help="diagnose setup problems before they cost anything").set_defaults(
         func=cmd_doctor
     )
     sub.add_parser("status", help="what state everything is in, and what to run next").set_defaults(
         func=cmd_status
     )
-    sub.add_parser("series", help="list series and their arms' current share").set_defaults(
-        func=cmd_series
+    sub.add_parser("themes", help="list themes and their arms' current share").set_defaults(
+        func=cmd_themes
     )
 
-    p_ideate = sub.add_parser("ideate", help="plan new videos")
-    p_ideate.add_argument("--count", type=_positive, default=None, help="how many (default: settings)")
-    p_ideate.add_argument("--series", help="force a single series instead of sampling")
-    p_ideate.add_argument("--lang", help="with --series, which channel to target")
-    p_ideate.add_argument("--dry-run", action="store_true", help="print ideas without saving")
-    p_ideate.set_defaults(func=cmd_ideate)
+    p = sub.add_parser("research", help="choose a topic and gather its primary sources")
+    p.add_argument("--count", type=_positive, default=None)
+    p.add_argument("--theme", help="force a theme instead of sampling")
+    p.add_argument("--dry-run", action="store_true", help="print without saving")
+    p.set_defaults(func=cmd_research)
 
-    p_gen = sub.add_parser("generate", help="render planned ideas into mp4 (costs money)")
-    p_gen.add_argument("--limit", type=_positive, default=3)
-    p_gen.add_argument("--backend", help="override the configured backend (e.g. fake)")
-    p_gen.add_argument(
-        "--dry-run", action="store_true", help="use the fake backend, spend nothing (wins over --backend)"
-    )
-    p_gen.add_argument("--prompt", help="ad-hoc: generate one video from this prompt")
-    p_gen.add_argument("--prompt-file", help="ad-hoc: read the prompt from a file")
-    p_gen.add_argument("--output", help="ad-hoc: output path")
-    p_gen.set_defaults(func=cmd_generate)
+    p = sub.add_parser("script", help="write the script, with every number cited")
+    p.add_argument("--limit", type=_positive, default=1)
+    p.add_argument("--idea", type=_positive, default=None)
+    p.add_argument("--dry-run", action="store_true")
+    p.set_defaults(func=cmd_script)
 
-    p_post = sub.add_parser("postprocess", help="normalise, burn the title, cut a thumbnail")
-    p_post.add_argument("--limit", type=_positive, default=10)
-    p_post.set_defaults(func=cmd_postprocess)
+    p = sub.add_parser("narrate", help="synthesise the narration")
+    p.add_argument("--limit", type=_positive, default=1)
+    p.add_argument("--idea", type=_positive, default=None)
+    p.add_argument("--provider", help="override the TTS provider (google, silent)")
+    p.set_defaults(func=cmd_narrate)
 
-    p_pub = sub.add_parser("publish", help="upload approved renders to YouTube")
-    p_pub.add_argument("--limit", type=_positive, default=None)
-    p_pub.add_argument("--privacy", choices=["private", "unlisted", "public"], default=None)
-    p_pub.add_argument("--dry-run", action="store_true", help="show what would upload")
-    p_pub.set_defaults(func=cmd_publish)
+    p = sub.add_parser("footage", help="pull NASA material for the timeline")
+    p.add_argument("--limit", type=_positive, default=1)
+    p.add_argument("--idea", type=_positive, default=None)
+    p.set_defaults(func=cmd_footage)
 
-    p_live = sub.add_parser(
-        "go-live", help="make uploaded videos public (nothing is measured until this)"
-    )
-    p_live.add_argument("--limit", type=_positive, default=None)
-    p_live.add_argument("--dry-run", action="store_true")
-    p_live.set_defaults(func=cmd_go_live)
+    p = sub.add_parser("diagrams", help="draw the figures NASA does not have")
+    p.add_argument("--limit", type=_positive, default=1)
+    p.add_argument("--idea", type=_positive, default=None)
+    p.set_defaults(func=cmd_diagrams)
+
+    p = sub.add_parser("assemble", help="cut the video together")
+    p.add_argument("--limit", type=_positive, default=1)
+    p.add_argument("--idea", type=_positive, default=None)
+    p.set_defaults(func=cmd_assemble)
+
+    p = sub.add_parser("build", help="research through assemble in one go")
+    p.add_argument("--theme")
+    p.add_argument("--provider")
+    p.set_defaults(func=cmd_build)
+
+    p = sub.add_parser("publish", help="upload approved videos to YouTube")
+    p.add_argument("--limit", type=_positive, default=None)
+    p.add_argument("--privacy", choices=["private", "unlisted", "public"], default=None)
+    p.add_argument("--dry-run", action="store_true")
+    p.set_defaults(func=cmd_publish)
+
+    p = sub.add_parser("go-live", help="make uploads public (nothing is measured until this)")
+    p.add_argument("--limit", type=_positive, default=None)
+    p.add_argument("--dry-run", action="store_true")
+    p.set_defaults(func=cmd_go_live)
 
     sub.add_parser("sync-stats", help="pull view counts from YouTube").set_defaults(
         func=cmd_sync_stats
     )
     sub.add_parser("report", help="expand-or-stop decision numbers").set_defaults(func=cmd_report)
 
-    p_gc = sub.add_parser("gc", help="delete work files nothing refers to")
-    p_gc.add_argument("--dry-run", action="store_true")
-    p_gc.set_defaults(func=cmd_gc)
+    p = sub.add_parser("gc", help="delete work files nothing refers to")
+    p.add_argument("--dry-run", action="store_true")
+    p.set_defaults(func=cmd_gc)
 
-    p_auth = sub.add_parser("auth", help="run the YouTube OAuth flow (needs a browser)")
-    p_auth.add_argument("--channel", required=True, help="channel id from config/channels.yaml")
-    p_auth.set_defaults(func=cmd_auth)
+    p = sub.add_parser("auth", help="run the YouTube OAuth flow (needs a browser)")
+    p.add_argument("--channel", required=True)
+    p.set_defaults(func=cmd_auth)
 
     return parser
 
 
-# Failures the operator can act on, mapped to a hint rather than a traceback.
 def _explain(exc: Exception) -> str | None:
+    """Failures the operator can act on, mapped to a hint rather than a traceback."""
     from .budget import AlreadyRunning, BudgetExceeded
     from .db import MigrationRequired
     from .ffmpeg import FFmpegError, FFmpegMissing, FontMissing
-    from .pricing import InvalidVideoRequest, UnknownPriceError
+    from .llm import NoToolCall, Truncated
+    from .nasa import NasaError
+    from .tts import TTSError
     from .youtube import YouTubeAuthError
 
     if isinstance(exc, (config.ConfigError, MigrationRequired)):
@@ -370,14 +463,16 @@ def _explain(exc: Exception) -> str | None:
         return f"{exc}\nRun `tube-auto doctor` to see this month's spend."
     if isinstance(exc, AlreadyRunning):
         return str(exc)
-    if isinstance(exc, (FFmpegMissing, FontMissing)):
+    if isinstance(exc, (FFmpegMissing, FontMissing, TTSError)):
         return f"{exc}\nRun `tube-auto doctor` to check the rest of the setup."
     if isinstance(exc, FFmpegError):
         return f"video processing failed: {exc}"
+    if isinstance(exc, NasaError):
+        return f"NASA library unavailable: {exc}"
+    if isinstance(exc, (Truncated, NoToolCall)):
+        return str(exc)
     if isinstance(exc, YouTubeAuthError):
         return str(exc)
-    if isinstance(exc, (InvalidVideoRequest, UnknownPriceError)):
-        return f"{exc}\nCheck the video block in config/settings.yaml."
     if isinstance(exc, FileNotFoundError):
         return f"file not found: {exc}"
     if isinstance(exc, ValueError):

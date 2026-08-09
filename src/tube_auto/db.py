@@ -751,6 +751,33 @@ def get_assets(
     ).fetchall()
 
 
+def set_asset_path(conn: sqlite3.Connection, asset_id: int, path: str, **fields: Any) -> None:
+    """Fill in a slot that was reserved before its file existed.
+
+    Diagram slots are planned alongside footage so the visual mix is decided
+    once, then rendered later; this is how the later stage claims them.
+    """
+    columns = ["path = ?"]
+    values: list[Any] = [path]
+    for key in ("duration_s", "credit", "license_ok", "source_url"):
+        if key in fields:
+            columns.append(f"{key} = ?")
+            values.append(int(fields[key]) if key == "license_ok" else fields[key])
+    if "meta" in fields:
+        columns.append("meta_json = ?")
+        values.append(json.dumps(fields["meta"], ensure_ascii=False))
+    values.append(asset_id)
+    conn.execute(f"UPDATE assets SET {', '.join(columns)} WHERE id = ?", values)
+
+
+def unfilled_assets(conn: sqlite3.Connection, idea_id: int, kind: str) -> list[sqlite3.Row]:
+    """Reserved slots of one kind that still have no file."""
+    return conn.execute(
+        "SELECT * FROM assets WHERE idea_id = ? AND kind = ? AND path = '' ORDER BY chapter, order_idx",
+        (idea_id, kind),
+    ).fetchall()
+
+
 def unlicensed_assets(conn: sqlite3.Connection, idea_id: int) -> list[sqlite3.Row]:
     """Assets not cleared for use. Publishing with any of these is a rights risk."""
     return conn.execute(
