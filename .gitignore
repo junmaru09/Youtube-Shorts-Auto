@@ -1,0 +1,20 @@
+# secrets
+.env
+config/oauth/
+*.token.json
+
+# generated artifacts
+work/
+*.db
+*.sqlite3
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/

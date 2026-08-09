@@ -1,0 +1,95 @@
+# 日次の企画〜生成。
+#
+# 投稿と公開は意図的に自動化していません。人間のレビューゲートと YouTube Studio での
+# 目視確認を挟む設計を崩さないためで、これは品質管理であると同時に、YouTube が審査で
+# 求める「人間の編集介入の証明」でもあります。
+#
+# 既定では手動実行のみです。運用を始めるときに schedule のコメントを外してください。
+# 有効化する前に必要なもの:
+#   1. リポジトリシークレット GEMINI_API_KEY と ANTHROPIC_API_KEY
+#   2. work/ の永続化（GitHub Actions のランナーは毎回まっさらなので、SQLite と生成物が
+#      消えます。実運用では artifact / 外部ストレージ / セルフホストランナーのいずれかで
+#      状態を持ち越す必要があります）
+# 2 を用意せずに有効化すると、毎回ゼロから企画して重複排除も配分も効かず、課金だけが
+# 積み上がります。
+
+name: daily
+
+on:
+  workflow_dispatch:
+    inputs:
+      count:
+        description: 企画する本数
+        default: "3"
+      dry_run:
+        description: fake バックエンドで課金せずに実行する
+        type: boolean
+        default: true
+  # schedule:
+  #   - cron: "0 21 * * *"   # 06:00 JST
+
+concurrency:
+  group: shorts-auto-daily
+  cancel-in-progress: false
+
+jobs:
+  produce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ffmpeg and a CJK font
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg fonts-noto-cjk
+
+      - name: Install the package
+        run: pip install -e ".[dev]"
+
+      - name: Restore pipeline state
+        uses: actions/cache@v4
+        with:
+          path: work
+          key: shorts-auto-state-${{ github.run_id }}
+          restore-keys: shorts-auto-state-
+
+      - name: Diagnose the setup
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: shorts-auto doctor
+
+      - name: Plan
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: shorts-auto ideate --count "${{ inputs.count || 3 }}"
+
+      - name: Generate
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          shorts-auto generate --limit "${{ inputs.count || 3 }}" \
+            ${{ inputs.dry_run == 'false' && ' ' || '--dry-run' }}
+
+      - name: Post-process
+        run: shorts-auto postprocess
+
+      - name: Report what is waiting for a human
+        if: always()
+        run: shorts-auto status
+
+      - name: Keep the renders for review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: renders-${{ github.run_id }}
+          path: |
+            work/renders
+            work/thumbs
+            work/logs
+          retention-days: 14

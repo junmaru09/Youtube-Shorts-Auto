@@ -1,0 +1,69 @@
+# マイクロカメラ風の動物ドキュメンタリー。
+# 参照実例: https://www.youtube.com/shorts/irLPvLEeutA
+#           https://www.youtube.com/shorts/fVyifrgrG9U
+#           https://www.youtube.com/shorts/l71xWbde4NI
+# 2026年2月開設のチャンネルが登録1.2万で14.5M再生という実績あり。
+#
+# タイトルについての注意:
+# 「超小型カメラを付けてみた」のような一人称の事実主張は使わない。映像は完全に
+# 生成物であり、実際に撮影したと述べるのは誤解を招くメタデータになる。YouTube が
+# 明確に罰する対象なので、観察・再現の枠に収める。
+
+id: micro_camera_doc
+enabled: true
+languages: [ja, en]
+description: 生き物の巣の内部を極小スケールで見せる、自然ドキュメンタリー風の映像
+made_for_kids: false
+
+style: >
+  Raw micro-camera documentary look, no cinematic grading, natural available
+  light only, slight lens dirt and vignetting, shallow macro depth of field.
+
+prompt_template: |
+  {cinematography}. {subject}, {action}, {context}.
+  {style}
+  Audio: {audio}
+
+negative_prompt: >
+  cinematic color grading, lens flare, drone shot, human hands, blood, injury,
+  predation, dead animal, scientific equipment branding
+
+title_patterns:
+  ja:
+    - "{creature}の巣の中はこうなっている"
+    - "AIで再現した{creature}の地下世界"
+    - "{creature}が見ている世界を想像してみた"
+    - "誰も見たことがない{creature}のすみか"
+  en:
+    - "Inside a {creature} nest, recreated with AI"
+    - "What a {creature} might actually see"
+    - "The hidden world of a {creature}"
+
+hashtags:
+  ja: ["#生き物", "#観察", "#AI動画", "#shorts"]
+  en: ["#nature", "#aivideo", "#pov", "#shorts"]
+
+subject_pool:
+  - a leafcutter ant carrying a leaf fragment
+  - a trapdoor spider at its burrow entrance
+  - a mole pushing through packed soil
+  - a hedgehog settling into a leaf nest
+  - a scorpion under a rock at night
+  - a termite in a mound corridor
+  - a hermit crab withdrawing into its shell
+  - a bumblebee inside a nest cavity
+  - a mason bee sealing a tunnel
+  - an earthworm moving through a root channel
+
+banned:
+  - 動物の負傷・流血・捕食の描写
+  - 実在の研究機関名・ブランド名
+  - 本物の撮影であると明示する断定表現
+  - 実在人物の登場
+
+video:
+  model: veo-3.1-lite-generate-preview
+  duration_seconds: 8
+  aspect_ratio: "9:16"
+  resolution: "720p"
+  generate_audio: true

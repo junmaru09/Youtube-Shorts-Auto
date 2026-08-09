@@ -1,0 +1,62 @@
+# 危機一髪・生存本能系。参照動画のジャンル。
+# 実例: https://www.youtube.com/shorts/kHwpZcPRYpE (@sewabanashi)
+#       https://www.youtube.com/shorts/aoXApYLDO6k (ミステリー劇場)
+#       https://www.youtube.com/shorts/VCGk1Minkjc
+#
+# 日本語圏ではすでにかなり飽和している。生成コスト最小のベースラインとして置く。
+#
+# このシリーズは意図的に「生き物が危機を切り抜ける」ではなく「難所を越える」
+# 側に寄せている。負傷や生命の危険を写実的に合成した映像は Meta / TikTok が
+# すでに削除対象にしており、YouTube が追随する可能性が高い。
+
+id: survival_moment
+enabled: true
+languages: [ja]
+description: 難所を越える一瞬を1カットで見せる、素人撮影風の映像
+made_for_kids: false
+
+style: >
+  Handheld amateur phone footage, natural available light, slight camera shake,
+  documentary realism, no colour grading.
+
+prompt_template: |
+  {cinematography}. {subject}, {action}, {context}.
+  {style}
+  Audio: {audio}
+
+negative_prompt: >
+  blood, injury, wound, falling person, crash impact, dead animal, predation,
+  recognizable real person, licence plate, brand logo, news chyron
+
+title_patterns:
+  ja:
+    - "{subject}の身体能力が異常"
+    - "こんな越え方があるとは思わなかった"
+    - "{subject}の一瞬の判断がすごい"
+    - "この足場を渡りきる方法"
+
+hashtags:
+  ja: ["#すごい", "#おもしろ", "#AI動画", "#shorts"]
+
+subject_pool:
+  - a mountain goat on a narrow ledge
+  - a cat crossing a gap between rooftops
+  - a squirrel leaping between thin branches
+  - a hiker crossing a rope bridge
+  - a deer picking a path across river stones
+  - a cyclist taking a steep switchback
+  - a bird riding a gust up a cliff face
+  - a dog navigating a fallen log over a stream
+
+banned:
+  - 動物や人の負傷・流血の描写
+  - 転落・衝突の結末を写す描写
+  - 実在人物・実在事件の再現
+  - 実在ブランド・ロゴ・ナンバープレート
+
+video:
+  model: veo-3.1-lite-generate-preview
+  duration_seconds: 8
+  aspect_ratio: "9:16"
+  resolution: "720p"
+  generate_audio: true

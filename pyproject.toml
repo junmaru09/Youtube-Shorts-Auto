@@ -1,0 +1,31 @@
+[project]
+name = "shorts-auto"
+version = "0.1.0"
+description = "AI shorts generation pipeline: ideate -> generate -> review -> publish -> measure"
+requires-python = ">=3.12"
+dependencies = [
+    "google-genai>=2.17.0",
+    "anthropic>=0.40.0",
+    "google-api-python-client>=2.150.0",
+    "google-auth-oauthlib>=1.2.0",
+    "PyYAML>=6.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+review = ["streamlit>=1.40.0"]
+dev = ["pytest>=8.0.0"]
+
+[project.scripts]
+shorts-auto = "shorts_auto.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
