@@ -114,7 +114,7 @@ def _check_tokens() -> list[Check]:
                     name=f"OAuth [{channel['id']}]",
                     ok=False,
                     detail=f"no token at {resolved}",
-                    fix=f"run `shorts-auto auth --channel {channel['id']}` on a machine "
+                    fix=f"run `tube-auto auth --channel {channel['id']}` on a machine "
                     "with a browser, then copy the JSON here",
                 )
             )
@@ -139,7 +139,7 @@ def _check_tokens() -> list[Check]:
                     name=f"OAuth [{channel['id']}]",
                     ok=ok and not missing_scopes,
                     detail=detail,
-                    fix=f"re-run `shorts-auto auth --channel {channel['id']}`",
+                    fix=f"re-run `tube-auto auth --channel {channel['id']}`",
                 )
             )
         except Exception as exc:  # noqa: BLE001 - any parse failure means unusable
@@ -176,7 +176,7 @@ def _check_prices() -> list[Check]:
             name="price table",
             ok=not stale,
             detail=f"last verified {PRICES_VERIFIED_ON} ({age} days ago)",
-            fix=f"re-check {PRICING_DOC_URL} and update src/shorts_auto/pricing.py; "
+            fix=f"re-check {PRICING_DOC_URL} and update src/tube_auto/pricing.py; "
             "a wrong price scales the real spending cap by the same factor",
             blocking=False,
         )
@@ -204,7 +204,7 @@ def _check_pipeline_state() -> list[Check]:
                 name="visibility",
                 ok=False,
                 detail=f"{private} post(s) still private, earning no views",
-                fix="shorts-auto go-live",
+                fix="tube-auto go-live",
                 blocking=False,
             )
         )
@@ -216,7 +216,7 @@ def _check_pipeline_state() -> list[Check]:
                     name="sync-stats",
                     ok=False,
                     detail="never run, so no measurements exist",
-                    fix="shorts-auto sync-stats",
+                    fix="tube-auto sync-stats",
                     blocking=False,
                 )
             )
@@ -256,7 +256,7 @@ def run_checks() -> list[Check]:
 
 def render(checks: list[Check]) -> str:
     width = max((len(c.name) for c in checks), default=10)
-    lines = ["", "shorts-auto doctor", "=" * 72]
+    lines = ["", "tube-auto doctor", "=" * 72]
     for check in checks:
         lines.append(f"[{check.mark}] {check.name:<{width}}  {check.detail}")
         if not check.ok and check.fix:

@@ -1,4 +1,4 @@
-from shorts_auto import dedup
+from tube_auto import dedup
 
 
 def test_key_ignores_punctuation_and_case():

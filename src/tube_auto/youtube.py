@@ -86,7 +86,7 @@ def credentials(channel_id: str):
     if not token_path.exists():
         raise YouTubeAuthError(
             f"no token for channel '{channel_id}' at {token_path}. "
-            f"Run `shorts-auto auth --channel {channel_id}` on a machine with a browser "
+            f"Run `tube-auto auth --channel {channel_id}` on a machine with a browser "
             "and copy the resulting JSON here (see README)."
         )
 
@@ -98,7 +98,7 @@ def credentials(channel_id: str):
         else:
             raise YouTubeAuthError(
                 f"token for '{channel_id}' is invalid and cannot be refreshed; re-run "
-                f"`shorts-auto auth --channel {channel_id}`"
+                f"`tube-auto auth --channel {channel_id}`"
             )
     return creds
 

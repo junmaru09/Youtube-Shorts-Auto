@@ -1,0 +1,41 @@
+# 恒星の一生。
+#
+# NASA静止画（星雲316件）が使え、進化段階の図解も描きやすい。
+# 超新星20件・星形成17件と動画は少ないので静止画と図解が主役。
+
+id: stars
+enabled: true
+languages: [ja]
+description: 星が生まれてから終わるまでに起きること
+audience: 30〜50代・知的好奇心層。スケールの大きい話が好きな層
+
+nasa_queries:
+  - nebula
+  - star formation
+  - supernova remnant
+  - white dwarf
+  - stellar evolution
+
+arxiv_categories: [astro-ph.SR, astro-ph.GA]
+
+title_patterns:
+  ja:
+    - "{subject}が終わるとき何が起きるのか"
+    - "{subject}の一生を観測データで追う"
+    - "{subject}、実際の姿"
+    - "{subject}はどこまで巨大になれるのか"
+
+hashtags:
+  ja: ["#宇宙", "#恒星", "#科学", "#解説"]
+
+topic_seeds:
+  - ベテルギウスの減光騒動で分かったこと
+  - 星が生まれる雲の中で何が起きているか
+  - 太陽が赤色巨星になるまでの手順
+  - 白色矮星が冷えきるまでの時間
+  - 超新星の型はどう分類されるのか
+  - 重元素はどの段階で作られたのか
+
+banned:
+  - 特定の星の爆発時期を断定する
+  - 一次ソースのない数値

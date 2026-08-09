@@ -78,7 +78,7 @@ def run() -> AnalyticsResult:
         posts = db.measurable_posts(conn)
         result.posts = len(posts)
         if not posts:
-            log.info("no public posts to measure (run `shorts-auto go-live` first)")
+            log.info("no public posts to measure (run `tube-auto go-live` first)")
             db.record_run(conn, "sync-stats", ok=True, detail="no public posts")
             return result
 
@@ -136,7 +136,7 @@ def run() -> AnalyticsResult:
         if result.missed:
             log.warning(
                 "%d measurement window(s) passed unrecorded; run sync-stats daily "
-                "(see `shorts-auto doctor`)", len(result.missed)
+                "(see `tube-auto doctor`)", len(result.missed)
             )
         conn.commit()
         db.record_run(

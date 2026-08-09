@@ -2,7 +2,7 @@ from collections import Counter
 
 import pytest
 
-from shorts_auto.scoring import compute_allocation, compute_scores, pick_by_deficit
+from tube_auto.scoring import compute_allocation, compute_scores, pick_by_deficit
 
 ARMS = ["a:ja", "b:ja", "c:ja"]
 SAMPLED = {key: 10 for key in ARMS}

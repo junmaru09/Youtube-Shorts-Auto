@@ -1,0 +1,43 @@
+# 宇宙開発の歴史。
+#
+# NASA動画が非常に豊富（Apollo 221件、Artemis 1,892件、ISS 1,096件）。
+# 記録映像そのものに価値があり、実写比率を上げられる。
+# 実在の人物が写る素材が多いので、人物フィルタが特に効く。
+
+id: space_history
+enabled: true
+languages: [ja]
+description: 宇宙開発の現場で実際に起きたことと、その判断
+audience: 30〜50代・知的好奇心層。技術と意思決定の話が好きな層
+
+nasa_queries:
+  - Apollo program
+  - Voyager mission
+  - space shuttle
+  - Artemis
+  - International Space Station
+
+arxiv_categories: []
+
+title_patterns:
+  ja:
+    - "{subject}で本当は何が起きていたのか"
+    - "{subject}という判断の裏側"
+    - "記録が語る{subject}"
+    - "{subject}、成功と紙一重だった話"
+
+topic_seeds:
+  - アポロ13号の二酸化炭素除去装置をどう作ったか
+  - ボイジャーが今も通信できている理由
+  - スペースシャトルの断熱タイルという弱点
+  - ハッブルの鏡の研磨ミスとその修理
+  - ISSの空気と水をどう循環させているか
+  - 探査機の電源が尽きるまでの設計
+
+hashtags:
+  ja: ["#宇宙開発", "#歴史", "#解説", "#NASA"]
+
+banned:
+  - 事故の犠牲者を扱う際の憶測
+  - 実在人物の発言の捏造
+  - 一次ソースのない数値

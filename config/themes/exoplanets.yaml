@@ -1,0 +1,43 @@
+# 系外惑星と生命探査。
+#
+# NASA動画77件。系外惑星は想像図が多く、静止画とNASAの概念アートが使える。
+# トランジット法・視線速度法は図解が有効。
+
+id: exoplanets
+enabled: true
+languages: [ja]
+description: 太陽系の外の惑星と、そこに生命がいるのかという問い
+audience: 30〜50代・知的好奇心層。SFではなく現在の観測が知りたい層
+
+nasa_queries:
+  - exoplanet
+  - TRAPPIST-1
+  - habitable zone
+  - transit method
+  - James Webb exoplanet atmosphere
+
+arxiv_categories: [astro-ph.EP]
+
+title_patterns:
+  ja:
+    - "{subject}に生命はいるのか、現時点の答え"
+    - "{subject}の大気から何が見つかったか"
+    - "{subject}はどこまで分かったのか"
+    - "地球に似た星、{subject}の実際"
+
+hashtags:
+  ja: ["#宇宙", "#系外惑星", "#科学", "#解説"]
+
+topic_seeds:
+  - トランジット法で大気の成分が分かる理由
+  - ハビタブルゾーンの定義は何度も変わってきた
+  - 潮汐ロックされた惑星の気候
+  - 赤色矮星まわりの惑星が難しい理由
+  - バイオシグネチャーの誤検出をどう避けるか
+  - スーパーアースという分類の曖昧さ
+  - 自由浮遊惑星はどれだけあるのか
+
+banned:
+  - 地球外生命の発見を断定する
+  - 未確認の惑星を確定扱いする
+  - 一次ソースのない数値

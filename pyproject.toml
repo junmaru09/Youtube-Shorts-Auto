@@ -1,7 +1,7 @@
 [project]
-name = "shorts-auto"
+name = "tube-auto"
 version = "0.1.0"
-description = "AI shorts generation pipeline: ideate -> generate -> review -> publish -> measure"
+description = "Automated long-form YouTube pipeline: research -> script -> narrate -> assemble -> review -> publish -> measure"
 requires-python = ">=3.12"
 dependencies = [
     "google-genai>=2.17.0",
@@ -17,7 +17,7 @@ review = ["streamlit>=1.40.0"]
 dev = ["pytest>=8.0.0"]
 
 [project.scripts]
-shorts-auto = "shorts_auto.cli:main"
+tube-auto = "tube_auto.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]

@@ -4,7 +4,11 @@ import shutil
 
 import pytest
 
-from shorts_auto import config, db, paths
+from tube_auto import config, db, paths, reading
+
+# Every directory the pipeline writes into. Kept in one place so a new stage
+# adding a directory cannot quietly start writing into the real work/ during tests.
+WORK_SUBDIRS = ("FOOTAGE_DIR", "STILLS_DIR", "DIAGRAMS_DIR", "AUDIO_DIR", "RENDERS_DIR", "THUMBS_DIR")
 
 
 @pytest.fixture(autouse=True)
@@ -16,10 +20,9 @@ def temp_work(tmp_path, monkeypatch):
     """
     work = tmp_path / "work"
     monkeypatch.setattr(paths, "WORK_DIR", work)
-    monkeypatch.setattr(paths, "ASSETS_DIR", work / "assets")
-    monkeypatch.setattr(paths, "RENDERS_DIR", work / "renders")
-    monkeypatch.setattr(paths, "THUMBS_DIR", work / "thumbs")
-    monkeypatch.setenv("SHORTS_AUTO_DB", str(work / "test.db"))
+    for name in WORK_SUBDIRS:
+        monkeypatch.setattr(paths, name, work / name.removesuffix("_DIR").lower())
+    monkeypatch.setenv("TUBE_AUTO_DB", str(work / "test.db"))
     paths.ensure_work_dirs()
     return work
 
@@ -33,15 +36,12 @@ def temp_db():
 
 
 @pytest.fixture(autouse=True)
-def clear_config_cache():
+def clear_caches():
     config.reset_cache()
+    reading.reset_cache()
     yield
     config.reset_cache()
-
-
-@pytest.fixture
-def has_ffmpeg() -> bool:
-    return shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
+    reading.reset_cache()
 
 
 needs_ffmpeg = pytest.mark.skipif(

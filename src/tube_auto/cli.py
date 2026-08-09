@@ -2,16 +2,16 @@
 
 Daily loop:
 
-    shorts-auto doctor        is anything misconfigured?
-    shorts-auto status        what state is everything in, and what is next?
-    shorts-auto ideate        plan videos
-    shorts-auto generate      turn plans into mp4 files (this costs money)
-    shorts-auto postprocess   normalise, burn the title, cut a thumbnail
+    tube-auto doctor        is anything misconfigured?
+    tube-auto status        what state is everything in, and what is next?
+    tube-auto ideate        plan videos
+    tube-auto generate      turn plans into mp4 files (this costs money)
+    tube-auto postprocess   normalise, burn the title, cut a thumbnail
     streamlit run review_app.py   approve or reject
-    shorts-auto publish       upload as private
-    shorts-auto go-live       make them visible (nothing is measured until this)
-    shorts-auto sync-stats    pull view counts back in
-    shorts-auto report        the numbers that decide expand-or-stop
+    tube-auto publish       upload as private
+    tube-auto go-live       make them visible (nothing is measured until this)
+    tube-auto sync-stats    pull view counts back in
+    tube-auto report        the numbers that decide expand-or-stop
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ def _setup_logging(verbose: bool) -> None:
 
     handlers: list[logging.Handler] = [logging.StreamHandler(sys.stderr)]
     try:
-        file_handler = logging.FileHandler(log_dir / "shorts-auto.log", encoding="utf-8")
+        file_handler = logging.FileHandler(log_dir / "tube-auto.log", encoding="utf-8")
         file_handler.setFormatter(
             logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s")
         )
@@ -119,20 +119,20 @@ def cmd_status(args: argparse.Namespace) -> int:
     print("\n次にやること")
     print("=" * 60)
     if counts.get("ideated"):
-        print(f"  shorts-auto generate       ({counts['ideated']} 件の企画が生成待ち)")
+        print(f"  tube-auto generate       ({counts['ideated']} 件の企画が生成待ち)")
     if counts.get("generated"):
-        print(f"  shorts-auto postprocess    ({counts['generated']} 件が後処理待ち)")
+        print(f"  tube-auto postprocess    ({counts['generated']} 件が後処理待ち)")
     if pending_review:
         print(f"  streamlit run review_app.py ({pending_review} 件がレビュー待ち)")
     if counts.get("approved"):
-        print(f"  shorts-auto publish        ({counts['approved']} 件が投稿待ち)")
+        print(f"  tube-auto publish        ({counts['approved']} 件が投稿待ち)")
     if private:
-        print(f"  shorts-auto go-live        ({private} 件が private のまま = 再生されない)")
+        print(f"  tube-auto go-live        ({private} 件が private のまま = 再生されない)")
     if live:
-        print("  shorts-auto sync-stats     (再生数を取り込む。毎日実行)")
+        print("  tube-auto sync-stats     (再生数を取り込む。毎日実行)")
     if not any([counts.get("ideated"), counts.get("generated"), pending_review,
                 counts.get("approved"), private]):
-        print("  shorts-auto ideate         (キューが空です)")
+        print("  tube-auto ideate         (キューが空です)")
 
     print("\n現在の配分")
     print("=" * 60)
@@ -285,7 +285,7 @@ def cmd_auth(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="shorts-auto",
+        prog="tube-auto",
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -367,11 +367,11 @@ def _explain(exc: Exception) -> str | None:
     if isinstance(exc, (config.ConfigError, MigrationRequired)):
         return str(exc)
     if isinstance(exc, BudgetExceeded):
-        return f"{exc}\nRun `shorts-auto doctor` to see this month's spend."
+        return f"{exc}\nRun `tube-auto doctor` to see this month's spend."
     if isinstance(exc, AlreadyRunning):
         return str(exc)
     if isinstance(exc, (FFmpegMissing, FontMissing)):
-        return f"{exc}\nRun `shorts-auto doctor` to check the rest of the setup."
+        return f"{exc}\nRun `tube-auto doctor` to check the rest of the setup."
     if isinstance(exc, FFmpegError):
         return f"video processing failed: {exc}"
     if isinstance(exc, YouTubeAuthError):
@@ -397,7 +397,7 @@ def main(argv: list[str] | None = None) -> int:
             log.exception("unexpected failure in `%s`", args.command)
             print(
                 f"error: unexpected {type(exc).__name__}: {exc}\n"
-                f"A full traceback is in {paths.WORK_DIR / 'logs' / 'shorts-auto.log'}",
+                f"A full traceback is in {paths.WORK_DIR / 'logs' / 'tube-auto.log'}",
                 file=sys.stderr,
             )
             return 3

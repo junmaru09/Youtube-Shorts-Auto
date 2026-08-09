@@ -1,6 +1,6 @@
 """Stage 5: upload approved renders.
 
-Uploads land as `private`. They only become visible via `shorts-auto go-live`,
+Uploads land as `private`. They only become visible via `tube-auto go-live`,
 after the operator has seen the video on YouTube itself.
 
 Two ceilings apply. The API allows 6 uploads/day on the default quota
@@ -189,7 +189,7 @@ def run(
         if result.published and privacy != "public":
             result.notes.append(
                 "these are not visible yet. Check them in YouTube Studio, then run "
-                "`shorts-auto go-live` — until they are public they earn no views and "
+                "`tube-auto go-live` — until they are public they earn no views and "
                 "the report has nothing to measure."
             )
 

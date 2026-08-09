@@ -210,14 +210,14 @@ def _verdict(report: Report) -> list[str]:
     if report.private_waiting and not report.measured_videos:
         return [
             f"判定不能: {report.private_waiting} 本が private のままです。",
-            "`shorts-auto go-live` で公開してください。private の動画は再生されないので、",
+            "`tube-auto go-live` で公開してください。private の動画は再生されないので、",
             "このままではいつまでも計測値が集まりません。",
         ]
 
     if not report.measured_videos:
         return [
             "判定不能: まだ計測データがありません。",
-            "`shorts-auto publish` → `shorts-auto go-live` → `shorts-auto sync-stats` の順に実行してください。",
+            "`tube-auto publish` → `tube-auto go-live` → `tube-auto sync-stats` の順に実行してください。",
         ]
 
     if not report.has_enough_data:

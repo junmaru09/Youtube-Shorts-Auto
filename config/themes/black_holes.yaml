@@ -1,0 +1,44 @@
+# ブラックホールと重力。
+#
+# NASAの動画在庫は51件と少ないため、図解アニメーションが主役になる。
+# 事象の地平線、潮汐力、降着円盤、重力レンズは matplotlib で描ける。
+
+id: black_holes
+enabled: true
+languages: [ja]
+description: ブラックホールと重力がつくる現象
+audience: 30〜50代・知的好奇心層。数式なしで仕組みまで知りたい層
+
+nasa_queries:
+  - black hole
+  - black hole simulation
+  - accretion disk
+  - gravitational lensing
+  - neutron star merger
+
+arxiv_categories: [astro-ph.HE, gr-qc]
+
+title_patterns:
+  ja:
+    - "{subject}はなぜ{phenomenon}のか"
+    - "{subject}の常識が変わった話"
+    - "観測でわかった{subject}の正体"
+    - "{subject}を、いま分かっている範囲で"
+
+hashtags:
+  ja: ["#宇宙", "#ブラックホール", "#科学", "#解説"]
+
+topic_seeds:
+  - 事象の地平線の内側で何が起きるのか
+  - 超大質量ブラックホールはどうやって育つのか
+  - 潮汐破壊現象で星が引き裂かれる過程
+  - 降着円盤が明るく光る仕組み
+  - ブラックホール同士の合体と重力波
+  - 重力レンズが見せる遠方宇宙
+  - ホーキング放射は観測できるのか
+  - 中性子星とブラックホールの境目
+
+banned:
+  - 観測されていない現象を断定する
+  - ワームホール・タイムトラベルを実在するかのように扱う
+  - 一次ソースのない数値

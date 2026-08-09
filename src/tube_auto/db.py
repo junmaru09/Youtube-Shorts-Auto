@@ -1,10 +1,10 @@
 """SQLite state.
 
-Two invariants shape this schema, and both exist because violating them cost
-real money or real channel standing in the first version:
+Three invariants shape this schema, and the first two exist because violating
+them cost real money or real channel standing in an earlier version:
 
 1. **Spend ledgers are append-only.** `generations` and `llm_calls` record money
-   that has already left the account. Nothing deletes from them. The first
+   that has already left the account. Nothing deletes from them. An earlier
    version stored spend on the same row as the video file, so the review UI's
    regenerate button erased $8 of real spend from the budget guard's view.
 
@@ -13,8 +13,14 @@ real money or real channel standing in the first version:
    the same idea. Duplicate uploads are how a channel gets flagged for reused
    content, and that penalty applies to the whole channel.
 
-Derived artifacts (`renders`) are freely replaceable — re-rendering a title is
-cheap and local.
+3. **Every factual claim traces to a source.** `sources` holds the primary
+   references collected during research, each with a short ref like `S1`. The
+   script must cite them, and a script containing an uncited number is rejected
+   before anything is narrated. This is what separates the channel from the
+   "AI-rewrote-a-summary" content YouTube demonetised in early 2026.
+
+Derived artifacts (`scripts`, `narrations`, `assets`, `renders`) are freely
+replaceable — regenerating them is cheap and local.
 """
 
 from __future__ import annotations
@@ -28,24 +34,88 @@ from typing import Any
 
 from . import paths
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
+-- One planned video.
 CREATE TABLE IF NOT EXISTS ideas (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    series_id     TEXT    NOT NULL,
-    -- The target channel, chosen at ideation time. One idea serves one channel:
-    -- posting the same footage to two channels is reused content, and the
-    -- penalty is channel-wide.
+    series_id     TEXT    NOT NULL,   -- theme id, e.g. black_holes
+    -- The target channel. One idea serves one channel: posting the same video
+    -- to two channels is reused content, and the penalty is channel-wide.
     lang          TEXT    NOT NULL,
-    hook          TEXT    NOT NULL,
-    video_prompt  TEXT    NOT NULL,
-    scene_summary TEXT    NOT NULL DEFAULT '',
+    hook          TEXT    NOT NULL,   -- the video title
+    scene_summary TEXT    NOT NULL DEFAULT '',  -- the angle, used for dedup
+    why_now       TEXT    NOT NULL DEFAULT '',  -- which observation prompted it
+    -- What research decided each chapter covers. The brand supplies the shape;
+    -- this fills in the content, and the script stage reads both.
+    plan_json     TEXT    NOT NULL DEFAULT '[]',
     tags_json     TEXT    NOT NULL DEFAULT '[]',
     dedup_key     TEXT    NOT NULL UNIQUE,
     status        TEXT    NOT NULL DEFAULT 'ideated',
     attempts      INTEGER NOT NULL DEFAULT 0,
     created_at    TEXT    NOT NULL
+);
+
+-- Primary references gathered during research. `ref` is the citation key the
+-- script must use (S1, S2, ...). Deleting an idea drops its sources with it.
+CREATE TABLE IF NOT EXISTS sources (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    idea_id      INTEGER NOT NULL REFERENCES ideas(id) ON DELETE CASCADE,
+    ref          TEXT    NOT NULL,
+    kind         TEXT    NOT NULL,     -- nasa | jpl | arxiv
+    url          TEXT    NOT NULL,
+    title        TEXT    NOT NULL,
+    published_at TEXT,
+    summary      TEXT    NOT NULL DEFAULT '',
+    created_at   TEXT    NOT NULL,
+    UNIQUE (idea_id, ref)
+);
+
+-- The script. Two texts on purpose: `display_text` is what the subtitles show,
+-- `spoken_text` has numbers, units and proper nouns opened into kana because
+-- Google's Japanese TTS mis-reads them otherwise.
+CREATE TABLE IF NOT EXISTS scripts (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    idea_id       INTEGER NOT NULL REFERENCES ideas(id) ON DELETE CASCADE,
+    chapters_json TEXT    NOT NULL,   -- [{title, lines:[{speaker, display, spoken, refs}]}]
+    hooks_json    TEXT    NOT NULL DEFAULT '[]',  -- 3 opening variants to compare
+    char_count    INTEGER NOT NULL DEFAULT 0,
+    model         TEXT    NOT NULL DEFAULT '',
+    created_at    TEXT    NOT NULL,
+    UNIQUE (idea_id)
+);
+
+-- Synthesised narration, with the timecode of every chapter so the assembler
+-- can cut visuals to the audio rather than guessing.
+CREATE TABLE IF NOT EXISTS narrations (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    idea_id       INTEGER NOT NULL REFERENCES ideas(id) ON DELETE CASCADE,
+    path          TEXT    NOT NULL,
+    duration_s    REAL    NOT NULL DEFAULT 0,
+    chars         INTEGER NOT NULL DEFAULT 0,
+    timeline_json TEXT    NOT NULL DEFAULT '[]',  -- [{chapter, start_s, end_s}]
+    voices_json   TEXT    NOT NULL DEFAULT '{}',
+    created_at    TEXT    NOT NULL,
+    UNIQUE (idea_id)
+);
+
+-- Visual material. `credit` and `license_ok` exist because NASA's library mixes
+-- in third-party copyrighted work, which must never reach an upload.
+CREATE TABLE IF NOT EXISTS assets (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    idea_id    INTEGER NOT NULL REFERENCES ideas(id) ON DELETE CASCADE,
+    kind       TEXT    NOT NULL,   -- footage | still | diagram | concept | thumb
+    path       TEXT    NOT NULL,
+    chapter    INTEGER,
+    order_idx  INTEGER NOT NULL DEFAULT 0,
+    duration_s REAL    NOT NULL DEFAULT 0,
+    source_url TEXT    NOT NULL DEFAULT '',
+    nasa_id    TEXT,
+    credit     TEXT    NOT NULL DEFAULT '',
+    license_ok INTEGER NOT NULL DEFAULT 0,
+    meta_json  TEXT    NOT NULL DEFAULT '{}',
+    created_at TEXT    NOT NULL
 );
 
 -- APPEND-ONLY spend ledger for video generation. One row per paid API call.
@@ -78,10 +148,12 @@ CREATE TABLE IF NOT EXISTS llm_calls (
 CREATE TABLE IF NOT EXISTS renders (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     idea_id       INTEGER NOT NULL REFERENCES ideas(id) ON DELETE CASCADE,
-    generation_id INTEGER NOT NULL REFERENCES generations(id) ON DELETE CASCADE,
     path          TEXT    NOT NULL,
     thumb_path    TEXT,
-    burned_hook   TEXT    NOT NULL DEFAULT '',
+    duration_s    REAL    NOT NULL DEFAULT 0,
+    -- Description-ready "00:00 chapter" lines, generated from the narration
+    -- timeline. Chapters are what keeps a 20-minute video watchable.
+    chapters_text TEXT    NOT NULL DEFAULT '',
     created_at    TEXT    NOT NULL,
     UNIQUE (idea_id)
 );
@@ -137,13 +209,17 @@ CREATE TABLE IF NOT EXISTS runs (
 
 CREATE INDEX IF NOT EXISTS idx_ideas_status      ON ideas(status);
 CREATE INDEX IF NOT EXISTS idx_ideas_series      ON ideas(series_id, lang);
+CREATE INDEX IF NOT EXISTS idx_sources_idea      ON sources(idea_id);
+CREATE INDEX IF NOT EXISTS idx_assets_idea       ON assets(idea_id, kind);
 CREATE INDEX IF NOT EXISTS idx_gen_created       ON generations(created_at);
 CREATE INDEX IF NOT EXISTS idx_gen_idea          ON generations(idea_id);
 CREATE INDEX IF NOT EXISTS idx_llm_created       ON llm_calls(created_at);
 CREATE INDEX IF NOT EXISTS idx_runs_command      ON runs(command, started_at);
 """
 
-LEGACY_TABLES = ("assets",)
+# Tables whose *contents* would be lost by rebuilding. Checked before any
+# destructive migration so a database with real history is never silently reset.
+DATA_TABLES = ("ideas", "generations", "llm_calls", "posts")
 
 
 class MigrationRequired(RuntimeError):
@@ -166,52 +242,66 @@ def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
     return row is not None
 
 
-def _migrate(conn: sqlite3.Connection) -> None:
-    """Bring an existing database up to SCHEMA_VERSION.
+def _row_count(conn: sqlite3.Connection, table: str) -> int:
+    if not _table_exists(conn, table):
+        return 0
+    return int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
 
-    Version 0 is the pre-release layout that stored spend and artifacts on one
-    `assets` table. It cannot be mapped forward safely — the old rows do not
-    record which language a render targeted, and posts pointed at rows that the
-    review UI was allowed to delete. Rather than invent that history, refuse and
-    tell the operator what to do.
+
+def _drop_all_tables(conn: sqlite3.Connection) -> None:
+    names = [
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        )
+    ]
+    conn.execute("PRAGMA foreign_keys = OFF")
+    for name in names:
+        conn.execute(f'DROP TABLE IF EXISTS "{name}"')
+    conn.execute("PRAGMA foreign_keys = ON")
+
+
+def ensure_schema(conn: sqlite3.Connection) -> None:
+    """Migrate if needed, then guarantee every table exists.
+
+    Migration runs *before* the CREATE statements on purpose. `CREATE TABLE IF
+    NOT EXISTS` silently leaves an existing table's old column layout in place,
+    so creating first would hide exactly the mismatch this is meant to catch.
+
+    Earlier versions modelled a different product (8-second generated clips, not
+    narrated long-form). There is no honest way to map that history onto this
+    schema, so a database holding real rows is refused rather than reshaped.
     """
-    version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if version == SCHEMA_VERSION:
-        return
+    version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+
     if version > SCHEMA_VERSION:
         raise MigrationRequired(
             f"database is at schema version {version} but this code understands "
-            f"{SCHEMA_VERSION}. Upgrade shorts-auto or point SHORTS_AUTO_DB elsewhere."
+            f"{SCHEMA_VERSION}. Upgrade tube-auto or point TUBE_AUTO_DB elsewhere."
         )
 
-    legacy_rows = 0
-    for table in LEGACY_TABLES:
-        if _table_exists(conn, table):
-            legacy_rows += conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+    if version < SCHEMA_VERSION:
+        held = {t: _row_count(conn, t) for t in DATA_TABLES}
+        if any(held.values()):
+            detail = ", ".join(f"{t}={n}" for t, n in held.items() if n)
+            raise MigrationRequired(
+                f"this database is at schema version {version} and holds data ({detail}). "
+                f"Version {SCHEMA_VERSION} models narrated long-form video, which the older "
+                "rows cannot describe, so there is no honest automatic migration. Move the "
+                f"file aside (mv {paths.db_path()} {paths.db_path()}.v{version}) and run "
+                "`tube-auto init` to start clean, keeping the old file as a record of "
+                "past spend."
+            )
+        _drop_all_tables(conn)
 
-    if legacy_rows:
-        raise MigrationRequired(
-            f"this database uses the pre-release schema and holds {legacy_rows} row(s) in "
-            f"{', '.join(LEGACY_TABLES)}. There is no safe automatic migration: the old rows "
-            "do not record which channel each render targeted. Move the file aside "
-            f"(mv {paths.db_path()} {paths.db_path()}.v0) and run `shorts-auto init` to start "
-            "clean, keeping the old file as a record of past spend."
-        )
-
-    for table in LEGACY_TABLES:
-        if _table_exists(conn, table):
-            conn.execute(f"DROP TABLE {table}")
     conn.executescript(SCHEMA)
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-    conn.commit()
 
 
 def init_db() -> None:
     conn = connect()
     try:
-        conn.executescript(SCHEMA)
-        _migrate(conn)
-        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        ensure_schema(conn)
         conn.commit()
     finally:
         conn.close()
@@ -228,8 +318,7 @@ def session() -> Iterator[sqlite3.Connection]:
     """
     conn = connect()
     try:
-        conn.executescript(SCHEMA)
-        _migrate(conn)
+        ensure_schema(conn)
         yield conn
         conn.commit()
     finally:
@@ -249,25 +338,28 @@ def insert_idea(
     series_id: str,
     lang: str,
     hook: str,
-    video_prompt: str,
     scene_summary: str,
     tags: list[str],
     dedup_key: str,
+    why_now: str = "",
+    plan: list[dict[str, Any]] | None = None,
 ) -> int | None:
     """Insert an idea. Returns None when dedup_key already exists."""
     try:
         cursor = conn.execute(
             """
             INSERT INTO ideas
-              (series_id, lang, hook, video_prompt, scene_summary, tags_json, dedup_key, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+              (series_id, lang, hook, scene_summary, why_now, plan_json,
+               tags_json, dedup_key, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 series_id,
                 lang,
                 hook,
-                video_prompt,
                 scene_summary,
+                why_now,
+                json.dumps(plan or [], ensure_ascii=False),
                 json.dumps(tags, ensure_ascii=False),
                 dedup_key,
                 now(),
@@ -466,6 +558,206 @@ def adhoc_spend(conn: sqlite3.Connection) -> float:
     return float(row["t"])
 
 
+# --- sources (the citation trail) --------------------------------------------
+
+
+def replace_sources(conn: sqlite3.Connection, idea_id: int, sources: list[dict[str, Any]]) -> None:
+    """Set the primary references for an idea, replacing any earlier set.
+
+    Refs are assigned here (S1, S2, ...) so the script generator and the citation
+    check agree on the same keys.
+    """
+    conn.execute("DELETE FROM sources WHERE idea_id = ?", (idea_id,))
+    for index, source in enumerate(sources, start=1):
+        conn.execute(
+            """
+            INSERT INTO sources (idea_id, ref, kind, url, title, published_at, summary, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                idea_id,
+                source.get("ref") or f"S{index}",
+                source["kind"],
+                source["url"],
+                source["title"],
+                source.get("published_at"),
+                source.get("summary", ""),
+                now(),
+            ),
+        )
+
+
+def get_sources(conn: sqlite3.Connection, idea_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM sources WHERE idea_id = ? ORDER BY id", (idea_id,)
+    ).fetchall()
+
+
+def known_source_urls(conn: sqlite3.Connection, limit: int = 500) -> set[str]:
+    """URLs already used, so research does not rebuild yesterday's video."""
+    return {
+        row["url"]
+        for row in conn.execute("SELECT url FROM sources ORDER BY id DESC LIMIT ?", (limit,))
+    }
+
+
+# --- scripts -----------------------------------------------------------------
+
+
+def upsert_script(
+    conn: sqlite3.Connection,
+    *,
+    idea_id: int,
+    chapters: list[dict[str, Any]],
+    hooks: list[str],
+    char_count: int,
+    model: str,
+) -> int:
+    conn.execute(
+        """
+        INSERT INTO scripts (idea_id, chapters_json, hooks_json, char_count, model, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(idea_id) DO UPDATE SET
+            chapters_json = excluded.chapters_json,
+            hooks_json    = excluded.hooks_json,
+            char_count    = excluded.char_count,
+            model         = excluded.model,
+            created_at    = excluded.created_at
+        """,
+        (
+            idea_id,
+            json.dumps(chapters, ensure_ascii=False),
+            json.dumps(hooks, ensure_ascii=False),
+            char_count,
+            model,
+            now(),
+        ),
+    )
+    return int(conn.execute("SELECT id FROM scripts WHERE idea_id = ?", (idea_id,)).fetchone()["id"])
+
+
+def get_script(conn: sqlite3.Connection, idea_id: int) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM scripts WHERE idea_id = ?", (idea_id,)).fetchone()
+
+
+def recent_script_summaries(conn: sqlite3.Connection, series_id: str, limit: int) -> list[str]:
+    return [
+        row["scene_summary"]
+        for row in conn.execute(
+            "SELECT scene_summary FROM ideas WHERE series_id = ? ORDER BY id DESC LIMIT ?",
+            (series_id, limit),
+        )
+        if row["scene_summary"]
+    ]
+
+
+# --- narrations --------------------------------------------------------------
+
+
+def upsert_narration(
+    conn: sqlite3.Connection,
+    *,
+    idea_id: int,
+    path: str,
+    duration_s: float,
+    chars: int,
+    timeline: list[dict[str, Any]],
+    voices: dict[str, str],
+) -> int:
+    conn.execute(
+        """
+        INSERT INTO narrations
+          (idea_id, path, duration_s, chars, timeline_json, voices_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(idea_id) DO UPDATE SET
+            path          = excluded.path,
+            duration_s    = excluded.duration_s,
+            chars         = excluded.chars,
+            timeline_json = excluded.timeline_json,
+            voices_json   = excluded.voices_json,
+            created_at    = excluded.created_at
+        """,
+        (
+            idea_id,
+            path,
+            duration_s,
+            chars,
+            json.dumps(timeline, ensure_ascii=False),
+            json.dumps(voices, ensure_ascii=False),
+            now(),
+        ),
+    )
+    return int(
+        conn.execute("SELECT id FROM narrations WHERE idea_id = ?", (idea_id,)).fetchone()["id"]
+    )
+
+
+def get_narration(conn: sqlite3.Connection, idea_id: int) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM narrations WHERE idea_id = ?", (idea_id,)).fetchone()
+
+
+def tts_chars_since(conn: sqlite3.Connection, iso_timestamp: str) -> int:
+    """Characters synthesised this period, to watch the free-tier ceiling."""
+    row = conn.execute(
+        "SELECT COALESCE(SUM(chars), 0) AS n FROM narrations WHERE created_at >= ?",
+        (iso_timestamp,),
+    ).fetchone()
+    return int(row["n"])
+
+
+# --- assets (visual material) ------------------------------------------------
+
+
+def replace_assets(
+    conn: sqlite3.Connection, idea_id: int, kind: str, assets: list[dict[str, Any]]
+) -> None:
+    """Set the assets of one kind for an idea, replacing any earlier set."""
+    conn.execute("DELETE FROM assets WHERE idea_id = ? AND kind = ?", (idea_id, kind))
+    for index, asset in enumerate(assets):
+        conn.execute(
+            """
+            INSERT INTO assets
+              (idea_id, kind, path, chapter, order_idx, duration_s, source_url,
+               nasa_id, credit, license_ok, meta_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                idea_id,
+                kind,
+                asset["path"],
+                asset.get("chapter"),
+                asset.get("order_idx", index),
+                asset.get("duration_s", 0.0),
+                asset.get("source_url", ""),
+                asset.get("nasa_id"),
+                asset.get("credit", ""),
+                1 if asset.get("license_ok", False) else 0,
+                json.dumps(asset.get("meta", {}), ensure_ascii=False),
+                now(),
+            ),
+        )
+
+
+def get_assets(
+    conn: sqlite3.Connection, idea_id: int, kind: str | None = None
+) -> list[sqlite3.Row]:
+    if kind is None:
+        return conn.execute(
+            "SELECT * FROM assets WHERE idea_id = ? ORDER BY chapter, order_idx", (idea_id,)
+        ).fetchall()
+    return conn.execute(
+        "SELECT * FROM assets WHERE idea_id = ? AND kind = ? ORDER BY chapter, order_idx",
+        (idea_id, kind),
+    ).fetchall()
+
+
+def unlicensed_assets(conn: sqlite3.Connection, idea_id: int) -> list[sqlite3.Row]:
+    """Assets not cleared for use. Publishing with any of these is a rights risk."""
+    return conn.execute(
+        "SELECT * FROM assets WHERE idea_id = ? AND license_ok = 0", (idea_id,)
+    ).fetchall()
+
+
 # --- renders (derived, replaceable) ------------------------------------------
 
 
@@ -473,24 +765,24 @@ def upsert_render(
     conn: sqlite3.Connection,
     *,
     idea_id: int,
-    generation_id: int,
     path: str,
     thumb_path: str | None,
-    burned_hook: str,
+    duration_s: float = 0.0,
+    chapters_text: str = "",
 ) -> int:
     """Replace the render for an idea. Safe to re-run after a partial failure."""
     conn.execute(
         """
-        INSERT INTO renders (idea_id, generation_id, path, thumb_path, burned_hook, created_at)
+        INSERT INTO renders (idea_id, path, thumb_path, duration_s, chapters_text, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(idea_id) DO UPDATE SET
-            generation_id = excluded.generation_id,
             path          = excluded.path,
             thumb_path    = excluded.thumb_path,
-            burned_hook   = excluded.burned_hook,
+            duration_s    = excluded.duration_s,
+            chapters_text = excluded.chapters_text,
             created_at    = excluded.created_at
         """,
-        (idea_id, generation_id, path, thumb_path, burned_hook, now()),
+        (idea_id, path, thumb_path, duration_s, chapters_text, now()),
     )
     row = conn.execute("SELECT id FROM renders WHERE idea_id = ?", (idea_id,)).fetchone()
     return int(row["id"])
@@ -545,7 +837,7 @@ def pending_reviews(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     """Post-processed ideas that nobody has decided on yet."""
     return conn.execute(
         """
-        SELECT i.*, r.path AS render_path, r.thumb_path, r.burned_hook
+        SELECT i.*, r.path AS render_path, r.thumb_path, r.duration_s, r.chapters_text
         FROM ideas i
         JOIN renders r ON r.idea_id = i.id
         LEFT JOIN reviews v ON v.idea_id = i.id
@@ -591,7 +883,7 @@ def publishable_ideas(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     """Approved ideas with a render and no post yet."""
     return conn.execute(
         """
-        SELECT i.*, r.path AS render_path, r.thumb_path
+        SELECT i.*, r.path AS render_path, r.thumb_path, r.chapters_text
         FROM ideas i
         JOIN renders r ON r.idea_id = i.id
         WHERE i.status = 'approved'

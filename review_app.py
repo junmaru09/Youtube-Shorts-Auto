@@ -26,11 +26,11 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 import streamlit as st  # noqa: E402
 from dotenv import load_dotenv  # noqa: E402
 
-load_dotenv(Path(__file__).parent / ".env")  # same SHORTS_AUTO_DB as the CLI
+load_dotenv(Path(__file__).parent / ".env")  # same TUBE_AUTO_DB as the CLI
 
-from shorts_auto import config, db, ffmpeg, paths  # noqa: E402
-from shorts_auto.budget import month_start  # noqa: E402
-from shorts_auto.stages import postprocess  # noqa: E402
+from tube_auto import config, db, ffmpeg, paths  # noqa: E402
+from tube_auto.budget import month_start  # noqa: E402
+from tube_auto.stages import postprocess  # noqa: E402
 
 st.set_page_config(page_title="Shorts Review", page_icon="🎬", layout="wide")
 
@@ -116,13 +116,13 @@ c4.metric("今月の支出", f"${month_spend['total']:.2f}", f"上限 ${monthly_
 
 if waiting_to_go_live:
     st.warning(
-        f"{waiting_to_go_live} 本が private のままです。`shorts-auto go-live` を実行するまで "
+        f"{waiting_to_go_live} 本が private のままです。`tube-auto go-live` を実行するまで "
         "再生されず、計測もされません。"
     )
 
 if not pending:
     st.success(
-        "レビュー待ちはありません。`shorts-auto ideate` → `generate` → `postprocess` を実行してください。"
+        "レビュー待ちはありません。`tube-auto ideate` → `generate` → `postprocess` を実行してください。"
     )
     st.stop()
 

@@ -29,7 +29,7 @@ on:
   #   - cron: "0 21 * * *"   # 06:00 JST
 
 concurrency:
-  group: shorts-auto-daily
+  group: tube-auto-daily
   cancel-in-progress: false
 
 jobs:
@@ -53,35 +53,35 @@ jobs:
         uses: actions/cache@v4
         with:
           path: work
-          key: shorts-auto-state-${{ github.run_id }}
-          restore-keys: shorts-auto-state-
+          key: tube-auto-state-${{ github.run_id }}
+          restore-keys: tube-auto-state-
 
       - name: Diagnose the setup
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: shorts-auto doctor
+        run: tube-auto doctor
 
       - name: Plan
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: shorts-auto ideate --count "${{ inputs.count || 3 }}"
+        run: tube-auto ideate --count "${{ inputs.count || 3 }}"
 
       - name: Generate
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          shorts-auto generate --limit "${{ inputs.count || 3 }}" \
+          tube-auto generate --limit "${{ inputs.count || 3 }}" \
             ${{ inputs.dry_run == 'false' && ' ' || '--dry-run' }}
 
       - name: Post-process
-        run: shorts-auto postprocess
+        run: tube-auto postprocess
 
       - name: Report what is waiting for a human
         if: always()
-        run: shorts-auto status
+        run: tube-auto status
 
       - name: Keep the renders for review
         if: always()
