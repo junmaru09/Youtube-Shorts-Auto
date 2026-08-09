@@ -1,52 +1,61 @@
 # AI ASMR。
-# 実例: https://www.youtube.com/shorts/vkYj7f_fohc (Rene ASMR)
-#       https://www.youtube.com/shorts/IAiRpYIab8Q
-# 注意: 「ガラス果物カット」は既に成熟＝飽和。サバイバルASMR・不可能物体・
-# ジェリー系などの未開拓フォーマットに寄せる。視聴維持率が構造的に高く
-# アルゴリズム上有利、かつ完全に言語非依存。
+# 参照実例: https://www.youtube.com/shorts/vkYj7f_fohc (Rene ASMR)
+#           https://www.youtube.com/shorts/IAiRpYIab8Q
+#
+# 「ガラス果物カット」は既に成熟＝飽和しているため subject_pool から除外し、
+# サバイバルASMR・不可能物体・ジェリー系などの未開拓フォーマットに寄せている。
+# 視聴維持率が構造的に高くアルゴリズム上有利で、かつ言語に依存しない。
 
 id: ai_asmr
 enabled: true
-weight: 1.0
-language_independent: true
 languages: [ja, en]
-description: サバイバル/不可能物体系のAI ASMR（飽和したガラス果物系は除外）
+description: 不可能な物体を切る・崩す音を主役にしたASMR（飽和したガラス果物系は除外）
+made_for_kids: false
+
+style: >
+  Crisp studio lighting on a matte dark surface, razor-sharp focus at the point
+  of contact, slow deliberate motion, sound design carrying the shot.
+
+prompt_template: |
+  {cinematography}. {subject}, {action}, {context}.
+  {style}
+  Audio: {audio}
+
+negative_prompt: >
+  glass fruit, blood, flesh, body tissue, human face, dismemberment,
+  brand logo, music, speech
 
 title_patterns:
   ja:
     - "{material}を切る音が気持ちよすぎる"
     - "ありえない物体を切ってみた"
     - "{material}のASMR"
+    - "この音でしか得られない栄養がある"
   en:
     - "Cutting {material} | AI ASMR"
     - "Impossible object ASMR"
     - "Oddly satisfying {material} ASMR"
 
 hashtags:
-  ja: ["#ASMR", "#音フェチ", "#shorts"]
-  en: ["#asmr", "#satisfying", "#shorts"]
-
-prompt_template: |
-  Extreme macro close-up, vertical 9:16, crisp studio lighting on a dark surface.
-  {scene}
-  Razor-sharp focus on the point of contact, slow deliberate motion,
-  rich tactile sound design driving the shot.
-  No text overlay, no watermark, no hands beyond the wrist, no logos.
+  ja: ["#ASMR", "#音フェチ", "#AI動画", "#shorts"]
+  en: ["#asmr", "#satisfying", "#aivideo", "#shorts"]
 
 subject_pool:
-  - a knife slicing through layered volcanic obsidian that behaves like soft clay
+  - a knife slicing layered volcanic obsidian that behaves like soft clay
   - a blade parting a block of compressed moss and soil
   - a knife cutting a sphere of solidified honey with a crystalline core
-  - a scalpel opening a geode filled with liquid light
-  - a cleaver splitting a bar of compacted sand
-  - a knife slicing a rope coil made of frozen smoke
-  - a blade cutting through a cube of tangled copper wire
+  - a scalpel opening a geode filled with slow luminous liquid
+  - a cleaver splitting a bar of compacted dry sand
+  - a blade cutting through a coil of frozen smoke
+  - a knife slicing a cube of tangled copper wire
+  - a wire cutting through a block of layered coloured wax
+  - a blade parting a brick of pressed autumn leaves
 
 banned:
   - ガラス果物カット（飽和済みのため使用しない）
   - 血液・体組織を連想させる質感
-  - 実在ブランド・ロゴ
   - 人体や動物の切断を連想させる構図
+  - 実在ブランド・ロゴ
 
 video:
   model: veo-3.1-lite-generate-preview

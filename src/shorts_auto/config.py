@@ -9,7 +9,7 @@ from typing import Any
 import yaml
 
 from . import paths
-from .models import SeriesConfig
+from .models import Arm, SeriesConfig
 
 
 class ConfigError(Exception):
@@ -37,10 +37,10 @@ def load_channels() -> dict[str, Any]:
     channels = data.get("channels")
     if not isinstance(channels, list) or not channels:
         raise ConfigError("channels.yaml must define a non-empty 'channels' list")
-    for channel in channels:
+    for entry in channels:
         for required in ("id", "language", "token_path"):
-            if required not in channel:
-                raise ConfigError(f"channel {channel!r} is missing '{required}'")
+            if required not in entry:
+                raise ConfigError(f"channel {entry!r} is missing '{required}'")
     return data
 
 
@@ -51,7 +51,11 @@ def channel(channel_id: str) -> dict[str, Any]:
     raise ConfigError(f"unknown channel id: {channel_id}")
 
 
-_REQUIRED_SERIES_KEYS = ("id", "prompt_template")
+_REQUIRED_SERIES_KEYS = ("id", "prompt_template", "negative_prompt")
+
+# The prompt template is assembled from the fields the ideation model returns,
+# in the order Google's Veo guide recommends. Every one must have a slot.
+_REQUIRED_PROMPT_SLOTS = ("{cinematography}", "{subject}", "{action}", "{context}", "{audio}")
 
 
 def parse_series(data: dict[str, Any], source: str = "<memory>") -> SeriesConfig:
@@ -65,14 +69,24 @@ def parse_series(data: dict[str, Any], source: str = "<memory>") -> SeriesConfig
     if unknown:
         raise ConfigError(f"{source}: unknown series keys: {sorted(unknown)}")
 
-    if "{scene}" not in data["prompt_template"]:
-        raise ConfigError(f"{source}: prompt_template must contain a '{{scene}}' placeholder")
+    template = data["prompt_template"]
+    missing = [slot for slot in _REQUIRED_PROMPT_SLOTS if slot not in template]
+    if missing:
+        raise ConfigError(f"{source}: prompt_template is missing slots {missing}")
 
-    return SeriesConfig(**data)
+    series = SeriesConfig(**data)
+
+    if not series.languages:
+        raise ConfigError(f"{source}: series must target at least one language")
+    for lang in series.languages:
+        if not series.title_patterns.get(lang):
+            raise ConfigError(f"{source}: no title_patterns for language '{lang}'")
+
+    return series
 
 
-def load_series(include_disabled: bool = False) -> list[SeriesConfig]:
-    """Read every YAML in config/series/. Adding a genre = adding one file."""
+@lru_cache(maxsize=1)
+def _load_series_cached() -> tuple[SeriesConfig, ...]:
     if not paths.SERIES_DIR.exists():
         raise ConfigError(f"series directory not found: {paths.SERIES_DIR}")
 
@@ -83,19 +97,37 @@ def load_series(include_disabled: bool = False) -> list[SeriesConfig]:
         if parsed.id in seen:
             raise ConfigError(f"duplicate series id '{parsed.id}' in {path}")
         seen.add(parsed.id)
-        if parsed.enabled or include_disabled:
-            series.append(parsed)
+        series.append(parsed)
 
     if not series:
-        raise ConfigError("no enabled series found in config/series/")
-    return series
+        raise ConfigError("no series found in config/series/")
+    return tuple(series)
+
+
+def load_series(include_disabled: bool = False) -> list[SeriesConfig]:
+    all_series = _load_series_cached()
+    if include_disabled:
+        return list(all_series)
+    enabled = [s for s in all_series if s.enabled]
+    if not enabled:
+        raise ConfigError("every series in config/series/ is disabled")
+    return enabled
 
 
 def series_by_id(series_id: str) -> SeriesConfig:
-    for entry in load_series(include_disabled=True):
+    for entry in _load_series_cached():
         if entry.id == series_id:
             return entry
     raise ConfigError(f"unknown series id: {series_id}")
+
+
+def arms(include_disabled: bool = False) -> list[Arm]:
+    """Every (series, language) pair under test."""
+    return [
+        Arm(series_id=s.id, lang=lang)
+        for s in load_series(include_disabled=include_disabled)
+        for lang in s.languages
+    ]
 
 
 def video_defaults(series: SeriesConfig | None = None) -> dict[str, Any]:
@@ -106,7 +138,59 @@ def video_defaults(series: SeriesConfig | None = None) -> dict[str, Any]:
     return defaults
 
 
+def negative_prompt_for(series: SeriesConfig) -> str:
+    """Global negative prompt merged with the series' own, de-duplicated."""
+    parts: list[str] = []
+    for source in (load_settings().get("video", {}).get("negative_prompt", ""), series.negative_prompt):
+        for term in str(source).replace("\n", " ").split(","):
+            cleaned = term.strip()
+            if cleaned and cleaned not in parts:
+                parts.append(cleaned)
+    return ", ".join(parts)
+
+
+def validate_all() -> list[str]:
+    """Cross-file checks. Returns human-readable problems, empty if healthy."""
+    problems: list[str] = []
+    try:
+        channel_ids = {c["id"] for c in load_channels()["channels"]}
+    except ConfigError as exc:
+        return [str(exc)]
+
+    try:
+        series = load_series(include_disabled=True)
+    except ConfigError as exc:
+        return [str(exc)]
+
+    for entry in series:
+        for lang in entry.languages:
+            if lang not in channel_ids:
+                problems.append(
+                    f"series '{entry.id}' targets language '{lang}' but no channel has that id"
+                )
+            if not entry.hashtags.get(lang):
+                problems.append(f"series '{entry.id}' has no {lang} hashtags")
+
+    settings = load_settings()
+    pipeline = settings.get("pipeline", {})
+    ideas_per_day = int(pipeline.get("ideas_per_day", 0))
+    publish_per_day = int(pipeline.get("publish_per_day", 0))
+    if ideas_per_day > publish_per_day:
+        problems.append(
+            f"pipeline.ideas_per_day ({ideas_per_day}) exceeds publish_per_day "
+            f"({publish_per_day}); generated videos would pile up unpublished"
+        )
+    if publish_per_day > 6:
+        problems.append(
+            f"pipeline.publish_per_day ({publish_per_day}) exceeds the 6/day the default "
+            "YouTube Data API quota allows (videos.insert costs 1600 of 10,000 units)"
+        )
+
+    return problems
+
+
 def reset_cache() -> None:
     """Tests mutate config files; let them drop the memoised copies."""
     load_settings.cache_clear()
     load_channels.cache_clear()
+    _load_series_cached.cache_clear()

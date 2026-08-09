@@ -5,33 +5,45 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-# ideated -> generated -> post_processed -> approved / rejected -> published
+# ideated -> generated -> post_processed -> approved / rejected -> published -> live
 IDEA_STATUSES = (
     "ideated",
     "generated",
     "post_processed",
     "approved",
     "rejected",
-    "published",
+    "published",  # uploaded, still private
+    "live",       # visible on YouTube, accumulating views
     "failed",
 )
+
+# Statuses that will never move again without operator action.
+TERMINAL_STATUSES = ("rejected", "live", "failed")
 
 
 @dataclass(slots=True)
 class SeriesConfig:
-    """One A/B arm. Backed by a single YAML file in config/series/."""
+    """One genre. An A/B arm is a (series, language) pair.
+
+    Backed by a single YAML file in config/series/ — adding a genre is adding a
+    file.
+    """
 
     id: str
     enabled: bool = True
-    weight: float = 1.0
-    language_independent: bool = True
-    languages: list[str] = field(default_factory=lambda: ["ja", "en"])
+    languages: list[str] = field(default_factory=lambda: ["ja"])
     description: str = ""
+    style: str = ""
     title_patterns: dict[str, list[str]] = field(default_factory=dict)
     hashtags: dict[str, list[str]] = field(default_factory=dict)
-    prompt_template: str = "{scene}"
+    prompt_template: str = ""
     subject_pool: list[str] = field(default_factory=list)
     banned: list[str] = field(default_factory=list)
+    # English, passed straight to the video model. `banned` is Japanese guidance
+    # for the ideation model and never reaches the video model, so anything that
+    # must not appear on screen has to be repeated here.
+    negative_prompt: str = ""
+    made_for_kids: bool = False
     video: dict[str, Any] = field(default_factory=dict)
 
     def video_setting(self, key: str, default: Any = None) -> Any:
@@ -39,18 +51,33 @@ class SeriesConfig:
 
 
 @dataclass(slots=True)
-class Idea:
+class Arm:
+    """One A/B test arm: a genre aimed at one channel."""
+
+    series_id: str
+    lang: str
+
+    @property
+    def key(self) -> str:
+        return f"{self.series_id}:{self.lang}"
+
+    @classmethod
+    def parse(cls, key: str) -> Arm:
+        series_id, _, lang = key.rpartition(":")
+        return cls(series_id=series_id, lang=lang)
+
+
+@dataclass(slots=True)
+class IdeaDraft:
     """A planned video, before any pixels exist."""
 
     series_id: str
-    hook: dict[str, str]  # {"ja": "...", "en": "..."}
+    lang: str
+    hook: str
     video_prompt: str
     scene_summary: str
-    tags: dict[str, list[str]] = field(default_factory=dict)
+    tags: list[str] = field(default_factory=list)
     dedup_key: str = ""
-    id: int | None = None
-    status: str = "ideated"
-    created_at: str = ""
 
 
 @dataclass(slots=True)
@@ -76,4 +103,5 @@ class VideoRequest:
     resolution: str = "720p"
     generate_audio: bool = True
     negative_prompt: str | None = None
+    person_generation: str | None = None
     output_path: str | None = None

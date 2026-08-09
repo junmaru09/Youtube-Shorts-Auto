@@ -1,12 +1,16 @@
 """Stage 5: upload approved renders.
 
+Uploads land as `private`. They only become visible via `shorts-auto go-live`,
+after the operator has seen the video on YouTube itself.
+
 Two ceilings apply. The API allows 6 uploads/day on the default quota
 (videos.insert costs 1600 of 10,000 units); settings.yaml sets a lower
-self-imposed pace, because steady output is what separates a channel from a
-content farm in YouTube's eyes.
+self-imposed pace, because steady output is part of what separates a channel from
+a content farm.
 
-Uploads land as `private` by default so a bad generation cannot go public
-before a human has seen it on the platform itself.
+Each upload is committed immediately. An upload cannot be undone, so a lost
+record means a second upload of the same video — and duplicate uploads are how a
+channel gets flagged for reused content.
 """
 
 from __future__ import annotations
@@ -21,6 +25,14 @@ from .. import config, db, youtube
 
 log = logging.getLogger(__name__)
 
+# Prepended to every description. Not configurable: the disclosure is a legal
+# obligation under the EU AI Act, and burying or omitting it is not an option
+# the operator should have.
+DISCLOSURE = {
+    "ja": "※この動画は生成AIで制作しています。",
+    "en": "Note: this video was created with generative AI.",
+}
+
 
 @dataclass(slots=True)
 class PublishResult:
@@ -34,11 +46,16 @@ def _day_start() -> str:
     return (datetime.now(UTC) - timedelta(days=1)).isoformat(timespec="seconds")
 
 
-def build_description(idea_row, lang: str, channel: dict, tags: list[str]) -> str:
-    """Body text. The AI disclosure line is not optional — see youtube.py."""
-    hook = json.loads(idea_row["hook_json"]).get(lang, "")
+def build_description(hook: str, lang: str, channel: dict, tags: list[str]) -> str:
+    """Body text, with the AI disclosure first.
+
+    Placement matters: YouTube truncates the description in most surfaces, so a
+    disclosure at the bottom is a disclosure nobody reads.
+    """
+    parts = [DISCLOSURE.get(lang, DISCLOSURE["en"]), "", hook]
+    if tags:
+        parts += ["", " ".join(tags)]
     footer = (channel.get("description_footer") or "").strip()
-    parts = [hook, "", " ".join(tags)]
     if footer:
         parts += ["", footer]
     return "\n".join(parts).strip()
@@ -52,29 +69,31 @@ def run(
     settings = config.load_settings()
     pub_cfg = settings.get("publish", {})
     daily_cap = int(settings.get("pipeline", {}).get("publish_per_day", 3))
-    limit = limit if limit is not None else daily_cap
+    if daily_cap > youtube.MAX_UPLOADS_PER_DAY:
+        raise config.ConfigError(
+            f"pipeline.publish_per_day is {daily_cap} but the default YouTube Data API quota "
+            f"allows {youtube.MAX_UPLOADS_PER_DAY} uploads/day"
+        )
+
+    limit = daily_cap if limit is None else limit
+    if limit <= 0:
+        raise ValueError(f"limit must be positive, got {limit}")
+
     privacy = privacy or pub_cfg.get("initial_privacy", "private")
     category_id = str(pub_cfg.get("category_id", "24"))
-    disclose = bool(pub_cfg.get("disclose_synthetic_media", True))
-
-    if not disclose:
-        raise config.ConfigError(
-            "publish.disclose_synthetic_media must stay true: every video here is "
-            "AI-generated, and both YouTube's disclosure policy and the EU AI Act "
-            "labelling obligation require it."
-        )
+    max_failures = int(pub_cfg.get("max_upload_failures", 3))
 
     result = PublishResult()
     with db.session() as conn:
-        already_today = db.posts_published_since(conn, _day_start())
-        remaining = min(limit, max(0, daily_cap - already_today))
+        uploaded_today = db.posts_created_since(conn, _day_start())
+        remaining = min(limit, max(0, daily_cap - uploaded_today))
         if remaining <= 0:
             result.notes.append(
-                f"daily cap reached: {already_today}/{daily_cap} uploaded in the last 24h"
+                f"daily cap reached: {uploaded_today}/{daily_cap} uploaded in the last 24h"
             )
             return result
 
-        candidates = db.publishable_assets(conn)
+        candidates = db.publishable_ideas(conn)
         if not candidates:
             result.notes.append("nothing approved and waiting")
             return result
@@ -82,35 +101,49 @@ def run(
         if len(candidates) > remaining:
             result.skipped = len(candidates) - remaining
             result.notes.append(
-                f"{result.skipped} asset(s) held back by the daily cap "
-                f"({daily_cap}/day; API hard limit is 6/day on the default quota)"
+                f"{result.skipped} idea(s) held back by the daily cap ({daily_cap}/day; "
+                f"the API hard limit is {youtube.MAX_UPLOADS_PER_DAY}/day)"
             )
 
-        for asset in candidates[:remaining]:
-            lang = asset["lang"]
-            idea_id = int(asset["idea_id"])
+        for idea in candidates[:remaining]:
+            idea_id = int(idea["id"])
+            lang = idea["lang"]
+
+            # A candidate that keeps failing would otherwise sit at the head of the
+            # queue and eat a daily slot on every run.
+            if int(idea["attempts"]) >= max_failures:
+                db.set_idea_status(conn, idea_id, "failed")
+                conn.commit()
+                result.failed += 1
+                result.notes.append(
+                    f"idea {idea_id}: {idea['attempts']} upload failures, giving up"
+                )
+                continue
+
             try:
                 channel = config.channel(lang)
-            except config.ConfigError:
+            except config.ConfigError as exc:
                 result.failed += 1
-                result.notes.append(f"idea {idea_id}: no channel configured for lang '{lang}'")
+                result.notes.append(f"idea {idea_id}: {exc}")
                 continue
 
-            title = json.loads(asset["hook_json"]).get(lang, "").strip()
+            title = (idea["hook"] or "").strip()
             if not title:
                 result.failed += 1
-                result.notes.append(f"idea {idea_id}: empty {lang} title")
+                result.notes.append(f"idea {idea_id}: empty title")
                 continue
 
-            tags = json.loads(asset["tags_json"]).get(lang, [])
+            series = config.series_by_id(idea["series_id"])
+            tags = json.loads(idea["tags_json"] or "[]")
             all_tags = [*channel.get("default_tags", []), *[t.lstrip("#") for t in tags]]
-            description = build_description(asset, lang, channel, tags)
-            video_path = Path(asset["path"])
-            meta = json.loads(asset["meta_json"] or "{}")
-            thumb = Path(meta["thumbnail"]) if meta.get("thumbnail") else None
+            description = build_description(title, lang, channel, tags)
+            video_path = Path(idea["render_path"])
+            thumb = Path(idea["thumb_path"]) if idea["thumb_path"] else None
 
             if dry_run:
-                result.notes.append(f"would upload idea {idea_id} [{lang}] -> {channel['id']}: {title}")
+                result.notes.append(
+                    f"would upload idea {idea_id} -> {channel['id']} ({privacy}): {title}"
+                )
                 result.published += 1
                 continue
 
@@ -123,35 +156,41 @@ def run(
                     tags=all_tags,
                     privacy=privacy,
                     category_id=category_id,
-                    contains_synthetic_media=True,
+                    made_for_kids=series.made_for_kids,
                     thumbnail_path=thumb,
                 )
             except Exception as exc:  # noqa: BLE001 - one bad upload must not kill the run
-                log.error("upload failed for idea %d [%s]: %s", idea_id, lang, exc)
+                log.error("upload failed for idea %d: %s", idea_id, exc)
+                db.bump_attempts(conn, idea_id)
+                conn.commit()
                 result.failed += 1
-                result.notes.append(f"idea {idea_id} [{lang}]: {exc}")
+                result.notes.append(f"idea {idea_id}: {exc}")
                 continue
 
+            # Commit immediately: the upload is already irreversible.
             db.insert_post(
                 conn,
-                asset_id=int(asset["id"]),
+                idea_id=idea_id,
                 channel_id=channel["id"],
                 youtube_video_id=video_id,
                 title=title,
+                path=str(video_path),
                 privacy=privacy,
             )
+            db.set_idea_status(conn, idea_id, "published")
+            db.reset_attempts(conn, idea_id)
+            conn.commit()
+
             result.published += 1
             result.notes.append(
-                f"idea {idea_id} [{lang}] -> https://youtube.com/shorts/{video_id} ({privacy})"
+                f"idea {idea_id} -> https://youtube.com/shorts/{video_id} ({privacy})"
             )
 
-        # An idea is done once every language variant has a post.
-        for asset in candidates[:remaining]:
-            idea_id = int(asset["idea_id"])
-            pending = [
-                a for a in db.publishable_assets(conn) if int(a["idea_id"]) == idea_id
-            ]
-            if not pending:
-                db.set_idea_status(conn, idea_id, "published")
+        if result.published and privacy != "public":
+            result.notes.append(
+                "these are not visible yet. Check them in YouTube Studio, then run "
+                "`shorts-auto go-live` — until they are public they earn no views and "
+                "the report has nothing to measure."
+            )
 
     return result

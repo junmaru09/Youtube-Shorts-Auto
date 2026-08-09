@@ -1,44 +1,57 @@
 # 歴史復元・タイムスリップ（日本語チャンネル専用）。
 # 実例: https://www.youtube.com/shorts/gBBlm_hEvlI (写真復活)
 #       https://www.youtube.com/@タイムスリップ日本
+#
 # 教養・ノスタルジー寄りで審査に通りやすい。日本語圏固有の需要。
-# 唯一の言語依存シリーズ（英語チャンネルには流さない）。
+#
+# タイトルについての注意:
+# 「昭和31年の東京」のように断定すると史実の主張になる。映像は生成物なので、
+# 必ず「AIで再現した」「〜のイメージ」の枠に収める。史実の歪曲は誤解を招く
+# メタデータであると同時に、このジャンル固有の信頼の問題でもある。
 
 id: retro_japan
 enabled: true
-weight: 1.0
-language_independent: false
 languages: [ja]
-description: 昭和・大正の日本の日常をAIで再現するタイムスリップ映像
+description: 昭和・大正の日本の日常をAIで再現した、記録映画風のイメージ映像
+made_for_kids: false
+
+style: >
+  Restored home-movie film look, slight grain and gate weave, muted
+  period-correct palette, soft optical falloff at the frame edges.
+
+prompt_template: |
+  {cinematography}. {subject}, {action}, {context}.
+  {style}
+  Audio: {audio}
+
+negative_prompt: >
+  modern cars, smartphones, plastic packaging, contemporary signage, brand
+  logo, recognizable real person, wartime damage, ruins, injury
 
 title_patterns:
   ja:
-    - "{era}の{place}にタイムスリップしてみた"
-    - "AIで蘇る{era}の{place}"
-    - "{era}の人はこんな暮らしをしていた"
+    - "AIで再現した{era}の{place}"
+    - "{era}の{place}はこんな雰囲気だったのかもしれない"
+    - "{era}の暮らしをAIで想像してみた"
+    - "もし{era}の{place}を歩けたら"
 
 hashtags:
-  ja: ["#昭和レトロ", "#タイムスリップ", "#shorts"]
-
-prompt_template: |
-  Vertical 9:16, period-accurate reconstruction shot like restored home-movie film.
-  {scene}
-  Slight film grain, gentle gate weave, muted period-correct colour palette.
-  No text overlay, no watermark, no modern objects, no logos.
+  ja: ["#昭和レトロ", "#AI動画", "#タイムスリップ", "#shorts"]
 
 subject_pool:
-  - a shopping street at dusk in 1950s Tokyo
+  - a shopping street at dusk in the 1950s
   - a wooden tram stop on a rainy morning
   - a public bathhouse entrance in winter
   - a fishing harbour at dawn
   - a rice field at planting season
   - a school courtyard at lunch break
   - a night stall serving noodles
+  - a riverside laundry on a summer afternoon
 
 banned:
   - 実在人物の再現（本人と特定できる描写）
   - 戦争・災害の被害描写
-  - 史実として断定する説明（あくまで「イメージ」と示す）
+  - 史実として断定する説明やタイトル
   - 実在ブランド・企業ロゴ
 
 video:
