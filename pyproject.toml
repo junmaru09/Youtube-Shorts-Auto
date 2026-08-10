@@ -4,10 +4,11 @@ version = "0.1.0"
 description = "Automated long-form YouTube pipeline: research -> script -> narrate -> assemble -> review -> publish -> measure"
 requires-python = ">=3.12"
 dependencies = [
-    "google-genai>=2.17.0",
-    "anthropic>=0.40.0",
-    "google-api-python-client>=2.150.0",
+    "anthropic>=0.40.0",              # research and script generation
+    "google-cloud-texttospeech>=2.16", # narration (Chirp 3 HD, 1M chars/month free)
+    "google-api-python-client>=2.150.0",  # YouTube Data and Analytics
     "google-auth-oauthlib>=1.2.0",
+    "matplotlib>=3.9",                # animated diagrams
     "PyYAML>=6.0",
     "python-dotenv>=1.0.0",
 ]

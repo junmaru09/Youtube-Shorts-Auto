@@ -71,11 +71,13 @@ def _font(brand: brand_mod.Brand) -> dict[str, Any]:
 # --- the figure kinds ---------------------------------------------------------
 
 
-# Everything is drawn inside a 0..1 box with the title reserved at the top, so
-# no figure can collide with its own heading.
-TITLE_Y = 0.90
-BODY_TOP = 0.80
-BODY_BOTTOM = 0.12
+# Everything is drawn inside a 0..1 box with a band reserved at each end: the
+# title at the top, and the bottom quarter left clear for the burned-in
+# subtitles. A timeline's stage labels landed on top of the narration text
+# before this was reserved.
+TITLE_Y = 0.92
+BODY_TOP = 0.84
+BODY_BOTTOM = 0.30
 
 
 def _title(axes, brand, label: str, font: dict) -> None:
@@ -192,9 +194,10 @@ def timeline_frames(axes, brand, progress: float, label: str, font: dict) -> Non
                      color=brand.palette["accent"] if reached else brand.palette["grid"],
                      zorder=3)
         if reached:
-            axes.text(x, y - 0.09, f"段階{index + 1}",
+            # Above the line: below it is where the subtitles sit.
+            axes.text(x, y + 0.07, f"段階{index + 1}",
                       color=brand.palette["sub"], fontsize=24,
-                      ha="center", va="top", **font)
+                      ha="center", va="bottom", **font)
 
 
 KINDS = {

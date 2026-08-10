@@ -16,6 +16,10 @@ nasa_queries:
   - galaxy formation
   - early universe
 
+# 動画は使わない。このテーマで通る映像は数件しかなく、
+# 画面に写っているものをメタデータから判定できない。
+allow_footage: false
+
 arxiv_categories: [astro-ph.CO, gr-qc]
 
 title_patterns:

@@ -16,6 +16,10 @@ nasa_queries:
   - ocean current
   - aurora from ISS
 
+# 動画は使わない。このテーマで通る映像は数件しかなく、
+# 画面に写っているものをメタデータから判定できない。
+allow_footage: false
+
 arxiv_categories: [physics.ao-ph]
 
 title_patterns:

@@ -58,6 +58,7 @@ def plan_cuts(
     cut_seconds: dict[str, int],
     footage_heavy: frozenset[str],
     chapter_keys: list[str],
+    allow_footage: bool = True,
 ) -> list[Slot]:
     """Divide each chapter into cuts and decide what kind of visual each wants.
 
@@ -78,6 +79,14 @@ def plan_cuts(
         "still": float(composition.get("still", 0.40)),
         "diagram": float(composition.get("diagram", 0.25)),
     }
+    if not allow_footage:
+        # Give the footage share to stills, not diagrams. There are 166,793
+        # stills and they vary; letting the slots fall through to diagrams
+        # instead produced a video that was two thirds generated figures,
+        # cycling the same three shapes.
+        weights["still"] += weights["footage"]
+        weights["footage"] = 0.0
+
     total_weight = sum(weights.values())
     if total_weight <= 0:
         return []
@@ -112,12 +121,13 @@ def plan_cuts(
     # the library does not hold it. Every other still in those chapters becomes
     # footage — converting all of them would both starve the chapter of variety
     # and burn through a topic's small stock of clips in one video.
-    swapped = 0
-    for slot, (_index, key, _start, _end) in zip(slots, spans_with_cuts):
-        if key in footage_heavy and slot.kind == "still":
-            swapped += 1
-            if swapped % 2:
-                slot.kind = "footage"
+    if allow_footage:
+        swapped = 0
+        for slot, (_index, key, _start, _end) in zip(slots, spans_with_cuts):
+            if key in footage_heavy and slot.kind == "still":
+                swapped += 1
+                if swapped % 2:
+                    slot.kind = "footage"
 
     return slots
 
@@ -258,7 +268,8 @@ def run(limit: int = 1, idea_id: int | None = None) -> FootageResult:
             theme = config.theme_by_id(idea["series_id"])
 
             slots = plan_cuts(
-                spans, composition, cut_seconds, brand_mod.FOOTAGE_HEAVY, chapter_keys
+                spans, composition, cut_seconds, brand_mod.FOOTAGE_HEAVY, chapter_keys,
+                allow_footage=theme.allow_footage,
             )
             if not slots:
                 result.failed += 1
@@ -272,11 +283,20 @@ def run(limit: int = 1, idea_id: int | None = None) -> FootageResult:
             db.replace_assets(
                 conn, current_id, "still", [a.as_dict() for a in assets if a.kind == "still"]
             )
-            # Reserve the diagram slots now, while the visual mix is being
-            # decided, and let `diagrams` render into them afterwards.
+            # Reserve a diagram for every slot the library could not fill, plus
+            # the ones already planned as diagrams. Leaving a gap would mean a
+            # stretch of video with nothing on screen.
+            filled = {
+                (a.chapter, round(a.meta.get("start_s", -1), 3)) for a in assets
+            }
+            pending = [
+                slot for slot in slots
+                if slot.kind == "diagram"
+                or (slot.chapter, round(slot.start_s, 3)) not in filled
+            ]
             db.replace_assets(
-                conn, current_id, "diagram", [_reserve(s, i) for i, s in
-                                              enumerate(s for s in slots if s.kind == "diagram")]
+                conn, current_id, "diagram",
+                [_reserve(slot, index) for index, slot in enumerate(pending)],
             )
             db.set_idea_status(conn, current_id, "sourced")
             conn.commit()
@@ -325,6 +345,10 @@ def _fill(slots: list[Slot], chapters: list[dict], theme, result: FootageResult)
         by_chapter.setdefault(slot.chapter, []).append(slot)
 
     assets: list[MediaAsset] = []
+    # Distinct across the whole video, not just within a chapter: the same
+    # nebula appearing in three chapters reads as a mistake.
+    used: set[str] = set()
+
     for chapter_index, chapter_slots in sorted(by_chapter.items()):
         chapter = chapters[chapter_index] if chapter_index < len(chapters) else {}
         queries = _queries(
@@ -335,8 +359,16 @@ def _fill(slots: list[Slot], chapters: list[dict], theme, result: FootageResult)
             wanted = sum(1 for s in chapter_slots if s.kind == kind)
             if wanted == 0:
                 continue
+            if kind == "footage" and not theme.allow_footage:
+                # Those slots fall through to diagrams, which is the better
+                # video for a theme whose footage cannot be vetted by machine.
+                continue
 
-            items = gather_material(queries, media_type, wanted)
+            items = [
+                item for item in gather_material(queries, media_type, wanted + len(used))
+                if item.nasa_id not in used
+            ][:wanted]
+            used.update(item.nasa_id for item in items)
             if not items:
                 log.info(
                     "no %s available for chapter %d (%s); diagrams will cover it",
@@ -345,8 +377,10 @@ def _fill(slots: list[Slot], chapters: list[dict], theme, result: FootageResult)
                 continue
 
             targets = [s for s in chapter_slots if s.kind == kind]
-            for index, slot in enumerate(targets):
-                item = items[index % len(items)]
+            # One item per slot, never reused. Cycling through a short result
+            # list is what turned a test episode into the same clip seven times;
+            # an uncovered slot becomes a diagram, which is a better video.
+            for index, (slot, item) in enumerate(zip(targets, items)):
                 asset = _download(item, media_type, index)
                 if asset is None:
                     continue
@@ -355,5 +389,12 @@ def _fill(slots: list[Slot], chapters: list[dict], theme, result: FootageResult)
                 asset.meta["start_s"] = round(slot.start_s, 3)
                 asset.meta["end_s"] = round(slot.end_s, 3)
                 assets.append(asset)
+
+            if len(items) < len(targets):
+                log.info(
+                    "chapter %d wanted %d %s but only %d distinct item(s) exist; "
+                    "the rest become diagrams",
+                    chapter_index, len(targets), kind, len(items),
+                )
 
     return assets

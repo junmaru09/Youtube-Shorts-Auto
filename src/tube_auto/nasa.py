@@ -43,15 +43,21 @@ VIDEO_RENDITIONS = ("large", "medium", "orig", "mobile", "small")
 IMAGE_RENDITIONS = ("orig", "large", "medium", "small")
 
 # Metadata that means someone other than NASA holds rights.
+#
+# `©` and `(c)` sit outside the \b group on purpose: neither starts with a word
+# character, so a leading \b can never match and the notice would slip through.
 RIGHTS_MARKERS = re.compile(
-    r"""\b(
-        copyright | \(c\) | ©
-      | courtesy\s+of
-      | used\s+with\s+permission
-      | all\s+rights\s+reserved
-      | getty | reuters | associated\s+press | shutterstock | adobe\s+stock
-      | ESA/Hubble | STScI | AURA | ESO\b | JAXA | Roscosmos
-    )\b""",
+    r"""(
+        © | \(c\)\s*\d
+      | \b(?:
+            copyright
+          | courtesy\s+of
+          | used\s+with\s+permission
+          | all\s+rights\s+reserved
+          | getty | reuters | associated\s+press | shutterstock | adobe\s+stock
+          | ESA/Hubble | STScI | AURA | ESO | JAXA | Roscosmos
+        )\b
+    )""",
     re.IGNORECASE | re.VERBOSE,
 )
 
@@ -65,6 +71,70 @@ PERSON_MARKERS = re.compile(
       | engineer | scientist(?:s)? \s+ (?:pose|poses|posing)
       | employees | interview | press\s+conference | award | ceremony
       | speaks | speaking | visits | visitors | students
+      | gala | celebration | celebrating | anniversary | tribute | memorial
+      | honou?rs | reunion | graduation | welcome
+    )\b""",
+    re.IGNORECASE | re.VERBOSE,
+)
+
+# Finished programmes: explainer segments, interviews, briefings, episodes.
+#
+# These are public domain and pass every rights check, and they are still
+# unusable. They arrive with their own title cards, their own narration, a
+# presenter on camera, and the NASA insignia burned into the frame — which is
+# trademarked and *not* public domain. Dropping a clip of one under a different
+# narration produces a video that contradicts itself.
+#
+# Found by watching the output: a test episode filled every footage slot with
+# "What is a Black Hole | We Asked a NASA Expert", logo and presenter included.
+PRODUCED_MARKERS = re.compile(
+    r"""(
+        \bwe\s+asked\b | \bsciencecasts?\b | \bnasa\s+explorers\b
+      | \bepisode\b | \bep\.\s*\d | \bpart\s+\d+\b
+      | \bexplained\b | \bexplains\b | \bwhat\s+is\s+a?\b
+      | \bbriefing\b | \btown\s+hall\b | \bpanel\b | \bq\s*&\s*a\b
+      | \blive\b | \bbroadcast\b | \bteleconference\b
+      | \btrailer\b | \bpromo\b | \bpsa\b
+      | \|\s*NASA\b | \bhosted\s+by\b | \bnarrated\s+by\b
+      | \bdigest\s+series\b | \bspace\s+to\s+ground\b | \bthis\s+week\s+at\s+nasa\b
+      | \bmedia\s+reel\b | \bhighlights?\b | \brecap\b | \bcoverage\b
+      | \bmilestone\s+for\b | \bcountdown\b
+    )""",
+    re.IGNORECASE | re.VERBOSE,
+)
+
+# A title that is only a catalogue number, e.g. "KSC-05-S-00032".
+#
+# These are release packages, not clips: they open with a NASA slate — a
+# full-frame insignia over a "MISSION FEATURE" card — and the title carries no
+# text a filter could match. Three of them reached a finished test video, logo
+# and all, which is how this rule was found.
+CATALOGUE_ID_TITLE = re.compile(r"[A-Za-z]{2,6}[-_ ]?\d{2,}[-_A-Za-z0-9 ]*", re.ASCII)
+
+# Charts, plots and multi-panel composites.
+#
+# These are figures from papers and press kits: white backgrounds, axis labels
+# sized for a page, several small panels in one frame. On a dark timeline they
+# flash, and at video size nothing in them is readable. A test episode opened on
+# a four-panel simulation plot with the subtitle sitting on white.
+FIGURE_MARKERS = re.compile(
+    r"""\b(
+        figure\s*\d | fig\.\s*\d | panels? | plot | chart | graph
+      | diagram | schematic | infographic | comparison\s+chart
+      | side-?by-?side | before\s+and\s+after | montage | collage | composite\s+of
+      | light\s*curve | spectrum | spectra | histogram
+    )\b""",
+    re.IGNORECASE | re.VERBOSE,
+)
+
+# Signals that a clip is raw or rendered imagery rather than a finished piece.
+# Used as a preference, not a requirement — some good material says none of this.
+RAW_IMAGERY_MARKERS = re.compile(
+    r"""\b(
+        simulation | visualization | visualisation | animation | render
+      | flyover | fly-?through | timelapse | time-?lapse | rotation
+      | b-?roll | raw | footage\s+of | view\s+(?:from|of) | orbit(?:ing)?
+      | data\s+visualization | model | mosaic | panorama
     )\b""",
     re.IGNORECASE | re.VERBOSE,
 )
@@ -98,10 +168,16 @@ class RightsVerdict:
     ok: bool
     reason: str = ""
     credit: str = "NASA"
+    raw_imagery: bool = False
 
 
 def assess_rights(item: NasaItem) -> RightsVerdict:
-    """Whether this item may be used on a monetised channel."""
+    """Whether this item may be used as raw material on a monetised channel.
+
+    Two different questions, answered together because failing either one means
+    the item is unusable: may we legally use it, and is it material rather than
+    a finished programme.
+    """
     text = item.haystack
 
     if item.secondary_creator and "nasa" not in item.secondary_creator.lower():
@@ -121,8 +197,21 @@ def assess_rights(item: NasaItem) -> RightsVerdict:
     if match:
         return RightsVerdict(False, f"a person is the subject: {match.group(0)!r}")
 
+    match = PRODUCED_MARKERS.search(f"{item.title} {item.description[:400]}")
+    if match:
+        return RightsVerdict(False, f"a finished programme, not material: {match.group(0)!r}")
+
+    if CATALOGUE_ID_TITLE.fullmatch(item.title.strip()):
+        return RightsVerdict(
+            False, f"an unlabelled release package: {item.title!r}"
+        )
+
+    match = FIGURE_MARKERS.search(f"{item.title} {item.description[:300]}")
+    if match:
+        return RightsVerdict(False, f"a figure, not an image: {match.group(0)!r}")
+
     credit = f"NASA/{item.center}" if item.center else "NASA"
-    return RightsVerdict(True, credit=credit)
+    return RightsVerdict(True, credit=credit, raw_imagery=bool(RAW_IMAGERY_MARKERS.search(text)))
 
 
 def _safe_url(url: str) -> str:
@@ -194,17 +283,19 @@ def search(
     if not cleared_only:
         return items
 
-    kept: list[NasaItem] = []
+    # Clips that look like raw imagery come first: they cut together, where a
+    # produced segment's title cards and presenters do not.
+    kept: list[tuple[bool, NasaItem]] = []
     for item in items:
         verdict = assess_rights(item)
         if verdict.ok:
-            kept.append(item)
+            kept.append((verdict.raw_imagery, item))
         else:
             log.debug("skipping %s: %s", item.nasa_id, verdict.reason)
 
     if items and not kept:
         log.warning("every result for %r (%s) failed the rights check", query, media_type)
-    return kept
+    return [item for _raw, item in sorted(kept, key=lambda pair: not pair[0])]
 
 
 def asset_urls(nasa_id: str) -> list[str]:

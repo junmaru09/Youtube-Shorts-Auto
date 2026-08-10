@@ -61,7 +61,38 @@ def format_chapters(spans: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def build_subtitles(timeline: list[dict[str, Any]], output: Path, wrap: int = 24) -> Path:
+# Japanese line breaking: these may not start a line, so a naive split by
+# character count strands a lone 。 or ） on the next row.
+NO_LINE_START = "。、）」』】〕》〉！？ー・…‥,.!?)]}"
+NO_LINE_END = "（「『【〔《〈([{"
+
+
+def wrap_japanese(text: str, width: int) -> str:
+    """Break a line at `width`, without orphaning punctuation.
+
+    Japanese has no spaces, so wrapping is by count — but a break that puts a
+    closing mark at the start of a line, or an opening bracket at the end of
+    one, reads as a typesetting error.
+    """
+    if len(text) <= width:
+        return text
+
+    lines: list[str] = []
+    remaining = text
+    while len(remaining) > width:
+        cut = width
+        while cut > 1 and (remaining[cut] in NO_LINE_START or remaining[cut - 1] in NO_LINE_END):
+            cut -= 1
+        if cut <= 1:
+            cut = width
+        lines.append(remaining[:cut])
+        remaining = remaining[cut:]
+    if remaining:
+        lines.append(remaining)
+    return "\n".join(lines)
+
+
+def build_subtitles(timeline: list[dict[str, Any]], output: Path, wrap: int = 26) -> Path:
     """An SRT from the narration timeline, wrapped for a 1080p frame."""
     def stamp(seconds: float) -> str:
         ms = int(round(seconds * 1000))
@@ -72,13 +103,34 @@ def build_subtitles(timeline: list[dict[str, Any]], output: Path, wrap: int = 24
 
     blocks = []
     for index, entry in enumerate(timeline, start=1):
-        text = entry["display"]
-        wrapped = "\n".join(text[i : i + wrap] for i in range(0, len(text), wrap)) or text
+        wrapped = wrap_japanese(entry["display"], wrap)
         blocks.append(f"{index}\n{stamp(entry['start_s'])} --> {stamp(entry['end_s'])}\n{wrapped}\n")
 
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text("\n".join(blocks), encoding="utf-8")
     return output
+
+
+# NASA release packages open with a slate: a full-frame insignia over a
+# "MISSION FEATURE" card, typically five to ten seconds. Nothing in the metadata
+# says so, so the only reliable defence is to start well past it.
+SLATE_SECONDS = 12.0
+
+
+def _footage_offset(path: Path, needed: float) -> float:
+    """Where to start a clip so a title slate does not end up on screen.
+
+    Skips the head where the clip is long enough to afford it, and falls back to
+    a small offset on short clips — which are usually pure renders anyway, since
+    packages with slates run to minutes.
+    """
+    try:
+        duration = ffmpeg.video_info(path)["duration"]
+    except (ffmpeg.FFmpegError, OSError):
+        return 1.0
+    if duration <= needed + 2:
+        return 0.0
+    return min(SLATE_SECONDS, max(1.0, (duration - needed) * 0.25))
 
 
 def _segment(
@@ -100,12 +152,10 @@ def _segment(
     )
 
     if kind in ("footage", "diagram"):
-        # Take from a little way in: the first second of NASA footage is often a
-        # slate or a fade.
-        offset = 1.0 if kind == "footage" else 0.0
+        offset = _footage_offset(path, seconds) if kind == "footage" else 0.0
         cmd = [
             "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-            "-ss", f"{offset}", "-t", f"{seconds:.3f}", "-i", str(path),
+            "-ss", f"{offset:.3f}", "-t", f"{seconds:.3f}", "-i", str(path),
             "-vf", fit, "-an",
         ]
     else:
@@ -270,12 +320,19 @@ def build_video(
 
     cmd += [
         "-filter_complex",
+        # BorderStyle=4 paints an opaque box behind the text. NASA imagery runs
+        # from black starfields to white press figures, and an outline alone
+        # leaves the subtitle unreadable on the bright ones.
         f"[0:v]subtitles='{_escape(subtitles)}':force_style="
-        f"'FontSize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,MarginV=60'[v];"
+        f"'FontSize=22,PrimaryColour=&H00FFFFFF,BorderStyle=4,"
+        f"BackColour=&HA0000000,Outline=0,Shadow=0,MarginV=48'[v];"
         + audio_filter,
         "-map", "[v]", "-map", "[a]",
         "-c:v", "libx264", "-preset", FINAL_PRESET, "-crf", "21",
-        "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
+        "-pix_fmt", "yuv420p",
+        # loudnorm resamples internally and will happily emit 96 kHz if left to
+        # itself, which YouTube then re-encodes. Pin the output rate.
+        "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
         "-movflags", "+faststart", "-shortest",
         str(output),
     ]

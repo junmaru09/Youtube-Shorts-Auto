@@ -1,30 +1,32 @@
-# 日次の企画〜生成。
+# The daily build: research through assembly.
 #
-# 投稿と公開は意図的に自動化していません。人間のレビューゲートと YouTube Studio での
-# 目視確認を挟む設計を崩さないためで、これは品質管理であると同時に、YouTube が審査で
-# 求める「人間の編集介入の証明」でもあります。
+# Publishing and going public are deliberately *not* automated. The human review
+# gate and the check in YouTube Studio are what YouTube's 2025 policy asks for
+# when it says a channel must show editorial involvement, and an unattended
+# upload would remove exactly that.
 #
-# 既定では手動実行のみです。運用を始めるときに schedule のコメントを外してください。
-# 有効化する前に必要なもの:
-#   1. リポジトリシークレット GEMINI_API_KEY と ANTHROPIC_API_KEY
-#   2. work/ の永続化（GitHub Actions のランナーは毎回まっさらなので、SQLite と生成物が
-#      消えます。実運用では artifact / 外部ストレージ / セルフホストランナーのいずれかで
-#      状態を持ち越す必要があります）
-# 2 を用意せずに有効化すると、毎回ゼロから企画して重複排除も配分も効かず、課金だけが
-# 積み上がります。
+# Manual-dispatch only until the operator is ready. Before enabling `schedule`:
+#
+#   1. Repository secrets: ANTHROPIC_API_KEY, and GCP_TTS_KEY if narration is
+#      to run here rather than locally.
+#   2. Somewhere to keep work/ between runs. GitHub's runners start empty, so
+#      without persistence every run re-plans from scratch: the dedup history is
+#      gone, the theme allocation resets, and the spend ledger the budget guard
+#      reads is empty. The cache below is a stopgap, not a guarantee — caches
+#      are evicted. For real operation use a self-hosted runner or external
+#      storage.
 
 name: daily
 
 on:
   workflow_dispatch:
     inputs:
-      count:
-        description: 企画する本数
-        default: "3"
-      dry_run:
-        description: fake バックエンドで課金せずに実行する
-        type: boolean
-        default: true
+      theme:
+        description: テーマを固定する（空なら配分に従って抽選）
+        required: false
+      provider:
+        description: 音声（google / silent）。silent なら無音で経路だけ確認する
+        default: silent
   # schedule:
   #   - cron: "0 21 * * *"   # 06:00 JST
 
@@ -33,9 +35,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  produce:
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -56,40 +58,35 @@ jobs:
           key: tube-auto-state-${{ github.run_id }}
           restore-keys: tube-auto-state-
 
+      - name: Authenticate to Google Cloud for narration
+        if: ${{ inputs.provider == 'google' }}
+        run: |
+          echo '${{ secrets.GCP_TTS_KEY }}' > "$RUNNER_TEMP/gcp.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/gcp.json" >> "$GITHUB_ENV"
+
       - name: Diagnose the setup
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: tube-auto doctor
 
-      - name: Plan
+      - name: Build one video
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: tube-auto ideate --count "${{ inputs.count || 3 }}"
-
-      - name: Generate
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          tube-auto generate --limit "${{ inputs.count || 3 }}" \
-            ${{ inputs.dry_run == 'false' && ' ' || '--dry-run' }}
-
-      - name: Post-process
-        run: tube-auto postprocess
+          tube-auto build \
+            ${{ inputs.theme && format('--theme {0}', inputs.theme) || '' }} \
+            --provider "${{ inputs.provider || 'silent' }}"
 
       - name: Report what is waiting for a human
         if: always()
         run: tube-auto status
 
-      - name: Keep the renders for review
+      - name: Keep the render for review
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: renders-${{ github.run_id }}
+          name: render-${{ github.run_id }}
           path: |
             work/renders
-            work/thumbs
             work/logs
           retention-days: 14

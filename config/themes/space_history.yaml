@@ -17,6 +17,9 @@ nasa_queries:
   - Artemis
   - International Space Station
 
+# NASAの実映像を使う。探査機・打ち上げ・ISSは在庫が多く素性も明確。
+allow_footage: true
+
 arxiv_categories: []
 
 title_patterns:

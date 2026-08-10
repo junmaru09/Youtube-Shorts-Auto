@@ -45,6 +45,15 @@ class ThemeConfig:
     # Search terms used against NASA's library and arXiv.
     nasa_queries: list[str] = field(default_factory=list)
     arxiv_categories: list[str] = field(default_factory=list)
+    # Whether this theme may use NASA *video*, which is opt-in and off by default.
+    #
+    # Three separate test videos each shipped something no metadata filter could
+    # have caught: a presenter and the insignia, a "MISSION FEATURE" slate, and
+    # a third-party ESO/Hubble credit burned into the frame. Text about a clip
+    # cannot describe what is inside it. Mission themes have enough clean
+    # material to be worth the review; theory themes have three to nine usable
+    # clips and are better served by diagrams.
+    allow_footage: bool = False
     title_patterns: dict[str, list[str]] = field(default_factory=dict)
     hashtags: dict[str, list[str]] = field(default_factory=dict)
     # Seeds for the research model, not a fixed list.
