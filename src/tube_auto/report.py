@@ -97,6 +97,7 @@ class Report:
     min_samples: int
     private_waiting: int
     pending_review: int
+    thumbnail_wins: dict[str, int]
 
     @property
     def cost_jpy(self) -> float:
@@ -201,6 +202,7 @@ def collect() -> Report:
         live_posts = db.measurable_posts(conn)
         private_waiting = len(db.private_posts(conn))
         pending_review = len(db.pending_reviews(conn))
+        thumbnail_wins = db.thumbnail_ab_results(conn)
 
     shares = scoring.allocation(window=SCORING_WINDOW)
     for key, row in rows.items():
@@ -238,6 +240,7 @@ def collect() -> Report:
         min_samples=int(cfg.get("min_samples_before_weighting", 8)),
         private_waiting=private_waiting,
         pending_review=pending_review,
+        thumbnail_wins=thumbnail_wins,
     )
 
 
@@ -372,6 +375,18 @@ def render_report() -> str:
         f"  必要な月間再生数    {needed['high']:,.0f} 〜 {needed['low']:,.0f} 回"
         f"（RPMが高いほど少なくて済む）"
     )
+
+    if report.thumbnail_wins:
+        out.append("")
+        out.append("-" * 96)
+        out.append("サムネイルA/B（YouTube Studio の Test & Compare を手入力したもの）")
+        out.append("-" * 96)
+        total = sum(report.thumbnail_wins.values())
+        for variant, wins in sorted(report.thumbnail_wins.items(), key=lambda kv: -kv[1]):
+            bar = "█" * round(wins / total * 30)
+            out.append(f"  {variant:<10}{wins:>3} 勝  {wins / total:>5.0%}  {bar}")
+        if total < 5:
+            out.append(f"  ← {total} 件では傾向とは言えません。5件を超えたあたりから読めます。")
 
     out.append("")
     out.append("-" * 96)

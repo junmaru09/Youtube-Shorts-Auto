@@ -72,6 +72,9 @@ jobs:
       - name: Build one video
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Only used when images.enabled is on in settings.yaml. Absent secret
+          # is not an error: the stage falls back to drawn figures.
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           tube-auto build \
             ${{ inputs.theme && format('--theme {0}', inputs.theme) || '' }} \
@@ -88,5 +91,6 @@ jobs:
           name: render-${{ github.run_id }}
           path: |
             work/renders
+            work/thumbs
             work/logs
           retention-days: 14

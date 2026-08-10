@@ -1,6 +1,11 @@
 """List prices, so every call records what it actually cost.
 
-Source: https://ai.google.dev/gemini-api/docs/pricing
+Two things are billed here: the research and script calls, and generated concept
+art. Narration is free inside Google's monthly character allowance and is tracked
+separately in `db.tts_chars_since`, because going over does not fail, it starts
+charging.
+
+Sources: https://ai.google.dev/gemini-api/docs/pricing and Anthropic's pricing page.
 Last verified: 2026-08-08 (see PRICES_VERIFIED_ON — `doctor` warns when stale)
 
 This table calibrates the spending cap. A wrong entry does not just mis-report a
@@ -13,18 +18,15 @@ from __future__ import annotations
 PRICES_VERIFIED_ON = "2026-08-08"
 PRICING_DOC_URL = "https://ai.google.dev/gemini-api/docs/pricing"
 
-# model id -> resolution -> USD per second of output
-VIDEO_PRICES_USD_PER_SECOND: dict[str, dict[str, float]] = {
-    "veo-3.1-generate-preview": {"720p": 0.40, "1080p": 0.40, "4k": 0.60},
-    "veo-3.1-fast-generate-preview": {"720p": 0.10, "1080p": 0.12, "4k": 0.30},
-    "veo-3.1-lite-generate-preview": {"720p": 0.05, "1080p": 0.08},
-    # Omni Flash bills per token; 720p is ~5,792 tokens/s at $17.50/1M tokens.
-    "gemini-omni-flash": {"720p": 0.10, "1080p": 0.10},
+# model id -> USD per generated image.
+#
+# Billed as output tokens: gemini-2.5-flash-image emits 1,290 tokens per image at
+# $30/1M, which is where $0.039 comes from. It is listed per image because that
+# is the unit the pipeline can count before spending anything.
+IMAGE_PRICES_USD: dict[str, float] = {
+    "gemini-2.5-flash-image": 0.039,
+    "gemini-2.0-flash-preview-image-generation": 0.039,
 }
-
-# Veo 3.1 accepts only these durations, and 1080p/4k require the full 8 seconds.
-VALID_DURATIONS = (4, 6, 8)
-EIGHT_SECOND_ONLY_RESOLUTIONS = ("1080p", "4k")
 
 # Per-million-token prices for the ideation model.
 LLM_PRICES_USD_PER_MTOK: dict[str, dict[str, float]] = {
@@ -38,43 +40,26 @@ class UnknownPriceError(KeyError):
     """Raised when a model/resolution pair has no listed price."""
 
 
-class InvalidVideoRequest(ValueError):
-    """The request would be rejected by the API, or is not what the caller meant."""
+def price_per_image(model: str) -> float:
+    """What one generated image costs.
 
-
-def price_per_second(model: str, resolution: str) -> float:
+    An unlisted model is an error, not a free one. Defaulting to zero would let a
+    model nobody priced spend the whole budget while the guard reported nothing.
+    """
     try:
-        return VIDEO_PRICES_USD_PER_SECOND[model][resolution]
+        return IMAGE_PRICES_USD[model]
     except KeyError as exc:
         raise UnknownPriceError(
-            f"no price listed for model={model!r} resolution={resolution!r}; "
-            f"add it to pricing.VIDEO_PRICES_USD_PER_SECOND after checking {PRICING_DOC_URL}"
+            f"no price listed for image model {model!r}; add it to "
+            f"pricing.IMAGE_PRICES_USD after checking {PRICING_DOC_URL}"
         ) from exc
 
 
-def estimate_cost(model: str, resolution: str, duration_seconds: float) -> float:
-    return round(price_per_second(model, resolution) * duration_seconds, 4)
-
-
-def validate_video_request(model: str, resolution: str, duration_seconds: int) -> None:
-    """Reject combinations the API refuses, before spending the call.
-
-    A rejected request wastes wall-clock and an operator's attention; catching it
-    locally turns a six-minute round trip into an immediate, explicit error.
-    """
-    if duration_seconds not in VALID_DURATIONS:
-        raise InvalidVideoRequest(
-            f"duration_seconds must be one of {VALID_DURATIONS}, got {duration_seconds}"
-        )
-    if resolution in EIGHT_SECOND_ONLY_RESOLUTIONS and duration_seconds != 8:
-        raise InvalidVideoRequest(
-            f"{resolution} requires duration_seconds=8, got {duration_seconds}"
-        )
-    if resolution not in VIDEO_PRICES_USD_PER_SECOND.get(model, {}):
-        raise InvalidVideoRequest(
-            f"model {model!r} does not support resolution {resolution!r} "
-            f"(supported: {sorted(VIDEO_PRICES_USD_PER_SECOND.get(model, {}))})"
-        )
+def estimate_image_cost(model: str, count: int) -> float:
+    """What a batch will cost, before any of it is spent."""
+    if count < 0:
+        raise ValueError(f"count must not be negative, got {count}")
+    return round(price_per_image(model) * count, 4)
 
 
 def estimate_llm_cost(model: str, input_tokens: int, output_tokens: int) -> float:

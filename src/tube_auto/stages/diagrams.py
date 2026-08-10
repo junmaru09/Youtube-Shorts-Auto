@@ -9,6 +9,12 @@ Each figure is animated. A still diagram held for ten seconds is dead screen
 time; the same figure with its orbit turning or its curve drawing itself holds
 attention for the same ten seconds at no extra cost.
 
+Some slots are filled with generated concept art instead. The four drawn figures
+are quantitative — an orbit, a scale bar, a curve, a timeline — and there is no
+quantitative figure for "what the inside of an event horizon might be like". It
+is off by default and capped per video, because it is the only part of this
+pipeline whose cost scales with how much of it you use.
+
 The visual language is fixed in `brand.py` so every episode looks like the same
 channel.
 """
@@ -23,7 +29,8 @@ from pathlib import Path
 from typing import Any
 
 from .. import brand as brand_mod
-from .. import config, db, ffmpeg, paths
+from .. import config, db, ffmpeg, imagegen, paths, pricing
+from ..budget import BudgetExceeded, BudgetGuard
 
 log = logging.getLogger(__name__)
 
@@ -37,9 +44,11 @@ RENDER_FPS = 15
 @dataclass(slots=True)
 class DiagramResult:
     drawn: int = 0
+    generated: int = 0
     ideas: int = 0
     failed: int = 0
     errors: list[str] = field(default_factory=list)
+    spent_usd: float = 0.0
 
 
 def _figure(brand: brand_mod.Brand, width: int = 1920, height: int = 1080):
@@ -269,6 +278,87 @@ def render(
     return output
 
 
+def concept_slots(slot_count: int, budget: int) -> set[int]:
+    """Which slot indices get generated art rather than a drawn figure.
+
+    Spread evenly and taken from a deterministic rule, so an episode re-rendered
+    after a rejection asks for the same images instead of buying new ones.
+    """
+    if budget <= 0 or slot_count <= 0:
+        return set()
+    take = min(budget, slot_count)
+    step = slot_count / take
+    return {min(slot_count - 1, int(index * step)) for index in range(take)}
+
+
+def _decodable(image: Path) -> bool:
+    try:
+        return bool(ffmpeg.probe(image).get("streams"))
+    except (ffmpeg.FFmpegError, OSError):
+        return False
+
+
+def render_concept(
+    prompt: str,
+    model: str,
+    seconds: float,
+    output: Path,
+    brand: brand_mod.Brand,
+    width: int = 1920,
+    height: int = 1080,
+) -> Path:
+    """Generate one image and give it the same slow push-in the stills get.
+
+    A generated frame held motionless for ten seconds reads as a stall, exactly
+    as a photograph does, so it gets the identical treatment rather than a
+    different one.
+    """
+    still = output.with_suffix(".png")
+    imagegen.generate(prompt, model, still)
+
+    # Decode it before building a video around it. ffmpeg given a corrupt image
+    # with `-loop 1` retries the broken frame indefinitely and only stops when
+    # the wrapper's timeout kills it five minutes later; probing turns that into
+    # an immediate, correctly-classified failure.
+    if not _decodable(still):
+        still.unlink(missing_ok=True)
+        raise imagegen.ImageGenError("the generated file is not a readable image")
+
+    frames = max(2, int(round(seconds * FPS)))
+    try:
+        ffmpeg._run([
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-loop", "1", "-t", f"{seconds:.3f}", "-r", str(FPS), "-i", str(still),
+            "-vf",
+            # Same shape as the stills in `assemble._segment`, and for the same
+            # reasons. `d` is output frames *per input frame*, so anything above
+            # 1 multiplies against the looped input; the zoom is driven by `on`.
+            # The length is capped with `-frames:v`, not `-t`: a `-t` output
+            # limit does not terminate a `-loop 1` input here, and the command
+            # runs until something kills it.
+            f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height},"
+            f"zoompan=z='1+0.06*on/{frames}':d=1:x='iw/2-(iw/zoom/2)':"
+            f"y='ih/2-(ih/zoom/2)':s={width}x{height}:fps={FPS},"
+            f"setsar=1",
+            "-frames:v", str(frames), "-an",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            "-pix_fmt", "yuv420p", str(output),
+        ], timeout=300)
+    finally:
+        still.unlink(missing_ok=True)
+    return output
+
+
+def _concept_settings(settings: dict[str, Any]) -> tuple[bool, str, int]:
+    images = settings.get("images", {}) or {}
+    return (
+        bool(images.get("enabled", False)),
+        str(images.get("model", "gemini-2.5-flash-image")),
+        int(images.get("concepts_per_video", 0)),
+    )
+
+
 def run(limit: int = 1, idea_id: int | None = None) -> DiagramResult:
     """Render every reserved diagram slot."""
     settings = config.load_settings()
@@ -277,9 +367,15 @@ def run(limit: int = 1, idea_id: int | None = None) -> DiagramResult:
     height = int(video_cfg.get("height", 1080))
     brand = brand_mod.load_brand()
     chapter_keys = [c.key for c in brand_mod.EPISODE_PLAN]
+    concepts_on, concept_model, concept_budget = _concept_settings(settings)
+
+    if concepts_on and not imagegen.available():
+        log.warning("images.enabled is on but GEMINI_API_KEY is not set; drawing figures only")
+        concepts_on = False
 
     result = DiagramResult()
     with db.session() as conn:
+        guard = BudgetGuard(conn, settings)
         if idea_id is not None:
             row = db.get_idea(conn, idea_id)
             ideas = [row] if row else []
@@ -301,30 +397,77 @@ def run(limit: int = 1, idea_id: int | None = None) -> DiagramResult:
                 result.ideas += 1
                 continue
 
+            wanted = concept_slots(len(slots), concept_budget) if concepts_on else set()
+
             drawn = 0
-            for slot in slots:
+            for index, slot in enumerate(slots):
                 chapter_index = slot["chapter"] or 0
                 key = chapter_keys[chapter_index] if chapter_index < len(chapter_keys) else "detail"
-                title = (
-                    chapters[chapter_index].get("title", "")
-                    if chapter_index < len(chapters)
-                    else ""
-                )
+                chapter = chapters[chapter_index] if chapter_index < len(chapters) else {}
+                title = chapter.get("title", "")
+                figure = CHAPTER_KIND.get(key, "curve")
                 output = (
                     paths.DIAGRAMS_DIR
                     / f"idea_{current_id:05d}"
                     / f"{slot['chapter']:02d}_{slot['order_idx']:03d}.mp4"
                 )
+
+                as_concept = index in wanted
+                if as_concept:
+                    cost = pricing.estimate_image_cost(concept_model, 1)
+                    try:
+                        guard.check(cost)
+                    except BudgetExceeded as exc:
+                        # Not a failure: the drawn figure is a complete substitute,
+                        # and stopping the episode over an optional image would be
+                        # a worse outcome than an episode of drawn figures.
+                        log.warning("concept art skipped for idea %d: %s", current_id, exc)
+                        result.errors.append(f"idea {current_id}: 予算により概念図を省略（{exc}）")
+                        as_concept = False
+
                 try:
-                    render(
-                        CHAPTER_KIND.get(key, "curve"),
-                        title,
-                        float(slot["duration_s"]),
-                        output,
-                        brand,
-                        width,
-                        height,
-                    )
+                    if as_concept:
+                        prompt = imagegen.build_prompt(
+                            chapter.get("visual_intent") or title,
+                            brand.palette,
+                        )
+                        render_concept(
+                            prompt, concept_model, float(slot["duration_s"]),
+                            output, brand, width, height,
+                        )
+                        # Committed before the asset row: a generated image that
+                        # was paid for must be in the ledger even if everything
+                        # after it fails.
+                        db.insert_generation(
+                            conn, idea_id=current_id, path=str(output),
+                            backend="gemini-image", model=concept_model,
+                            duration_s=float(slot["duration_s"]), cost_usd=cost,
+                            meta={"prompt": prompt},
+                        )
+                        conn.commit()
+                        guard.record(cost)
+                        result.spent_usd += cost
+                        result.generated += 1
+                        figure = "concept"
+                    else:
+                        render(
+                            figure, title, float(slot["duration_s"]),
+                            output, brand, width, height,
+                        )
+                except imagegen.ImageGenError as exc:
+                    # No image, so nothing was billed. Fall back rather than
+                    # leaving a hole in the timeline.
+                    log.warning("concept art failed for idea %d: %s", current_id, exc)
+                    result.errors.append(f"idea {current_id}: 概念図を生成できず図解で代替（{exc}）")
+                    try:
+                        render(
+                            figure, title, float(slot["duration_s"]),
+                            output, brand, width, height,
+                        )
+                    except (ffmpeg.FFmpegError, ffmpeg.FontMissing, OSError) as inner:
+                        result.failed += 1
+                        result.errors.append(f"idea {current_id} slot {slot['id']}: {inner}")
+                        continue
                 except (ffmpeg.FFmpegError, ffmpeg.FFmpegMissing, ffmpeg.FontMissing, OSError) as exc:
                     log.error("diagram failed for idea %d slot %d: %s", current_id, slot["id"], exc)
                     result.failed += 1
@@ -334,7 +477,7 @@ def run(limit: int = 1, idea_id: int | None = None) -> DiagramResult:
                 db.set_asset_path(
                     conn, int(slot["id"]), str(output),
                     credit=brand.channel_name, license_ok=True,
-                    meta={**json.loads(slot["meta_json"] or "{}"), "figure": CHAPTER_KIND.get(key, "curve")},
+                    meta={**json.loads(slot["meta_json"] or "{}"), "figure": figure},
                 )
                 drawn += 1
 

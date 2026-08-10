@@ -561,6 +561,87 @@ def test_a_render_without_a_thumbnail_is_queued_for_one(temp_db, temp_work):
     assert db.ideas_needing_thumbnails(temp_db) == []
 
 
+def test_an_idea_that_keeps_failing_validation_stops_being_paid_for(temp_db, monkeypatch):
+    """Every retry buys another script. Without a cap, one topic whose citations
+    never validate spends the month's budget by itself."""
+    from tube_auto import config
+    from tube_auto.stages import script
+
+    settings = json.loads(json.dumps(config.load_settings()))
+    settings["pipeline"] = {**settings["pipeline"], "max_retries_per_idea": 2}
+    monkeypatch.setattr(config, "load_settings", lambda: settings)
+
+    idea_id = _idea(temp_db, status="researched")
+    for _ in range(2):
+        db.bump_attempts(temp_db, idea_id)
+    temp_db.commit()
+
+    def _never_called(*args, **kwargs):
+        raise AssertionError("the LLM must not be called for a spent idea")
+
+    monkeypatch.setattr(script.LLMClient, "call_tool", _never_called)
+
+    result = script.run(limit=1)
+    assert result.written == 0
+    assert any("諦めます" in note for note in result.errors)
+
+    with db.session() as conn:
+        assert db.get_idea(conn, idea_id)["status"] == "failed"
+        assert conn.execute("SELECT COUNT(*) AS n FROM llm_calls").fetchone()["n"] == 0
+
+
+# --- thumbnail A/B ------------------------------------------------------------
+
+
+def _with_thumbs(conn, idea_id):
+    db.replace_assets(conn, idea_id, "thumb", [
+        {"path": f"/tmp/{name}.jpg", "order_idx": i, "license_ok": True,
+         "meta": {"variant": name}}
+        for i, name in enumerate(("number", "question", "subject"))
+    ])
+    conn.commit()
+
+
+def test_the_winning_thumbnail_is_recorded_against_its_variant(temp_db):
+    """Test & Compare has no API, so a human reads the result off Studio. This
+    is the only path back into the pipeline."""
+    idea_id = _idea(temp_db)
+    _with_thumbs(temp_db, idea_id)
+
+    assert db.record_thumbnail_winner(temp_db, idea_id, "question")
+    temp_db.commit()
+    assert db.thumbnail_ab_results(temp_db) == {"question": 1}
+
+    losers = [
+        json.loads(a["meta_json"])
+        for a in db.get_assets(temp_db, idea_id, "thumb")
+        if json.loads(a["meta_json"])["variant"] != "question"
+    ]
+    assert all(meta["ab_winner"] is False for meta in losers)
+
+
+def test_a_corrected_result_replaces_the_old_one(temp_db):
+    idea_id = _idea(temp_db)
+    _with_thumbs(temp_db, idea_id)
+    db.record_thumbnail_winner(temp_db, idea_id, "number")
+    db.record_thumbnail_winner(temp_db, idea_id, "subject")
+    temp_db.commit()
+    assert db.thumbnail_ab_results(temp_db) == {"subject": 1}
+
+
+def test_results_accumulate_across_episodes(temp_db):
+    for index, winner in enumerate(("number", "number", "subject")):
+        idea_id = _idea(temp_db, key=f"k{index}")
+        _with_thumbs(temp_db, idea_id)
+        db.record_thumbnail_winner(temp_db, idea_id, winner)
+    temp_db.commit()
+    assert db.thumbnail_ab_results(temp_db) == {"number": 2, "subject": 1}
+
+
+def test_an_idea_with_no_thumbnails_reports_that(temp_db):
+    assert db.record_thumbnail_winner(temp_db, _idea(temp_db), "number") is False
+
+
 def test_sources_are_replaced_not_appended(temp_db):
     idea_id = _idea(temp_db)
     for _ in range(2):

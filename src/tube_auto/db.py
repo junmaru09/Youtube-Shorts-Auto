@@ -770,6 +770,43 @@ def set_asset_path(conn: sqlite3.Connection, asset_id: int, path: str, **fields:
     conn.execute(f"UPDATE assets SET {', '.join(columns)} WHERE id = ?", values)
 
 
+def record_thumbnail_winner(conn: sqlite3.Connection, idea_id: int, variant: str) -> bool:
+    """Note which of the three thumbnails won its A/B test.
+
+    Recorded on the asset rather than in a table of its own: the result belongs
+    to the image, and there is no schema change, which matters because an
+    older-version database with data in it is refused rather than migrated.
+
+    YouTube's Test & Compare has no API — the result is read off Studio by a
+    human — so this is the only way the outcome gets back into the pipeline.
+    """
+    updated = 0
+    for row in get_assets(conn, idea_id, "thumb"):
+        meta = json.loads(row["meta_json"] or "{}")
+        won = meta.get("variant") == variant
+        if meta.get("ab_winner") == won:
+            continue
+        meta["ab_winner"] = won
+        conn.execute(
+            "UPDATE assets SET meta_json = ? WHERE id = ?",
+            (json.dumps(meta, ensure_ascii=False), row["id"]),
+        )
+        updated += 1
+    return updated > 0
+
+
+def thumbnail_ab_results(conn: sqlite3.Connection) -> dict[str, int]:
+    """Wins per variant, across every episode that has a recorded result."""
+    tally: dict[str, int] = {}
+    for row in conn.execute(
+        "SELECT meta_json FROM assets WHERE kind = 'thumb' AND meta_json LIKE '%ab_winner%'"
+    ):
+        meta = json.loads(row["meta_json"] or "{}")
+        if meta.get("ab_winner") and meta.get("variant"):
+            tally[meta["variant"]] = tally.get(meta["variant"], 0) + 1
+    return tally
+
+
 def unfilled_assets(conn: sqlite3.Connection, idea_id: int, kind: str) -> list[sqlite3.Row]:
     """Reserved slots of one kind that still have no file."""
     return conn.execute(

@@ -14,7 +14,8 @@ budget:
 pipeline:
   # 1日に企画する本数
   ideas_per_day: 1
-  # 生成失敗時に同一企画を再試行してよい回数
+  # 台本の出典検査に落ちた企画を作り直してよい回数。
+  # 1回の再試行が丸ごと1回分の課金なので、ここが無いと同じ企画に払い続ける。
   max_retries_per_idea: 2
 
 # 投稿ペースのランプアップ。
@@ -71,20 +72,36 @@ llm:
 
 tts:
   provider: google
-  # Chirp 3 HD。月100万文字まで無料。月30本×9,000文字=27万文字で枠内。
-  voice_model: Chirp3-HD
+  # 話者ごとの音声名は brand.py（または config/brand.yaml）の navigators で指定する。
+  # Chirp 3 HD は月100万文字まで無料。月30本×9,000文字=27万文字で枠内。
   language_code: ja-JP
   sample_rate: 24000
   free_tier_chars_per_month: 1000000
   # 無料枠のこの割合を超えたら doctor が警告する
   free_tier_warn_at: 0.8
 
+# 概念図の生成AI。
+#
+# NASAに素材がない理論系（事象の地平線の内側、重力波の伝わり方）を埋める。
+# matplotlib の4図解は定量的なので、「〜はどんな様子か」という絵は描けない。
+#
+# 既定はオフ。このパイプラインで唯一、使った分だけ費用が増える部分だから。
+# 1枚 $0.039。1本6枚なら $0.234、月30本で $7.0（¥1,050）。
+# 20枚まで増やすと月 $23.4 になり、台本の $8.55 と合わせて上限 $33 にほぼ届く。
+#
+# 有効にするには GEMINI_API_KEY を .env に入れて enabled: true にする。
+# キーが無ければ自動的にオフになり、図解だけで組み上がる。
 images:
-  # NASAに素材がない理論系の概念図を補う
+  enabled: false
   provider: gemini
   model: gemini-2.5-flash-image
-  concepts_per_video: 20
-  thumbnails_per_video: 3
+  # 1本の図解スロットのうち、AI生成に回す最大枚数。残りは matplotlib が描く。
+  concepts_per_video: 6
+
+# サムネイルに設定項目は無い。3案という数はYouTubeのTest & Compareの上限で、
+# 3案が何を主張するか（数値 / 問い / 主題）はコード側の設計。
+# その回のNASA静止画にテロップを焼くだけなので費用も発生しない。
+#   → src/tube_auto/stages/thumbnails.py
 
 postprocess:
   font_path: null       # 未設定なら Noto Sans CJK を自動検出

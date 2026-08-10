@@ -245,6 +245,8 @@ def cmd_diagrams(args: argparse.Namespace) -> int:
 
     result = diagrams.run(limit=args.limit, idea_id=args.idea)
     print(f"diagrams: {result.drawn} drawn across {result.ideas} idea(s), {result.failed} failed")
+    if result.generated:
+        print(f"  うち {result.generated} 枚がAI生成の概念図（${result.spent_usd:.3f}）")
     for problem in result.errors:
         print(f"  ! {problem}", file=sys.stderr)
     return 0 if result.failed == 0 else 1
@@ -276,6 +278,29 @@ def cmd_thumbnails(args: argparse.Namespace) -> int:
     for problem in result.errors:
         print(f"  ! {problem}", file=sys.stderr)
     return 0 if result.failed == 0 else 1
+
+
+def cmd_ab(args: argparse.Namespace) -> int:
+    """Record a Test & Compare result read off YouTube Studio."""
+    from .stages.thumbnails import VARIANTS
+
+    if args.winner not in VARIANTS:
+        print(f"--winner must be one of {', '.join(VARIANTS)}", file=sys.stderr)
+        return 1
+
+    with db.session() as conn:
+        if not db.record_thumbnail_winner(conn, args.idea, args.winner):
+            print(f"idea {args.idea}: サムネイルが見つかりません", file=sys.stderr)
+            return 1
+        conn.commit()
+        tally = db.thumbnail_ab_results(conn)
+
+    print(f"idea {args.idea}: 勝ち = {args.winner}")
+    print("  これまでの勝率: " + (
+        ", ".join(f"{name} {count}" for name, count in sorted(tally.items(), key=lambda kv: -kv[1]))
+        or "まだありません"
+    ))
+    return 0
 
 
 def cmd_build(args: argparse.Namespace) -> int:
@@ -435,6 +460,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=_positive, default=1)
     p.add_argument("--idea", type=_positive, default=None, help="redraw, even if they exist")
     p.set_defaults(func=cmd_thumbnails)
+
+    p = sub.add_parser("ab", help="record which thumbnail won in YouTube Studio")
+    p.add_argument("--idea", type=_positive, required=True)
+    p.add_argument("--winner", required=True, help="number | question | subject")
+    p.set_defaults(func=cmd_ab)
 
     p = sub.add_parser("build", help="research through assemble in one go")
     p.add_argument("--theme")

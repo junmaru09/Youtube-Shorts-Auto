@@ -258,6 +258,7 @@ def run(limit: int = 1, idea_id: int | None = None, dry_run: bool = False) -> Sc
     target_minutes = float(settings.get("video", {}).get("target_minutes", 18))
     target_chars = brand_mod.target_chars(target_minutes)
     brand = brand_mod.load_brand()
+    max_retries = int(settings.get("pipeline", {}).get("max_retries_per_idea", 2))
 
     client = LLMClient(
         model=llm_cfg.get("script_model", "claude-sonnet-5"),
@@ -278,6 +279,21 @@ def run(limit: int = 1, idea_id: int | None = None, dry_run: bool = False) -> Sc
 
         for idea in ideas:
             current_id = int(idea["id"])
+
+            # Each attempt is a full paid call. Without this an idea whose
+            # citations never validate is retried forever, and every retry buys
+            # another script — the one place in this pipeline where a bad topic
+            # can quietly spend the month's budget.
+            if int(idea["attempts"]) >= max_retries:
+                db.set_idea_status(conn, current_id, "failed")
+                conn.commit()
+                result.rejected += 1
+                result.errors.append(
+                    f"idea {current_id}: 台本生成が {idea['attempts']} 回失敗したので諦めます"
+                    f"（上限 pipeline.max_retries_per_idea = {max_retries}）"
+                )
+                continue
+
             sources = [dict(s) for s in db.get_sources(conn, current_id)]
             if not sources:
                 result.rejected += 1

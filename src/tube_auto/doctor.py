@@ -250,6 +250,57 @@ def _check_tts_budget() -> list[Check]:
     ]
 
 
+def _check_images() -> list[Check]:
+    """Concept art is the only cost here that scales with use, so it is stated
+    in advance rather than discovered in the ledger."""
+    from . import imagegen, pricing
+
+    cfg = config.load_settings().get("images", {}) or {}
+    if not cfg.get("enabled", False):
+        return [
+            Check(
+                name="concept art",
+                ok=True,
+                detail="off — figures are drawn with matplotlib at no cost",
+                blocking=False,
+            )
+        ]
+
+    model = str(cfg.get("model", "gemini-2.5-flash-image"))
+    per_video = int(cfg.get("concepts_per_video", 0))
+    per_day = int(config.load_settings().get("pipeline", {}).get("ideas_per_day", 1))
+
+    try:
+        monthly = pricing.estimate_image_cost(model, per_video * per_day * 30)
+    except pricing.UnknownPriceError as exc:
+        return [Check(name="concept art", ok=False, detail=str(exc)[:160],
+                      fix=f"add the price to pricing.IMAGE_PRICES_USD")]
+
+    if not imagegen.available():
+        return [
+            Check(
+                name="concept art",
+                ok=False,
+                detail="images.enabled is on but GEMINI_API_KEY is not set",
+                fix="set GEMINI_API_KEY in .env, or set images.enabled to false",
+                blocking=False,
+            )
+        ]
+
+    limit = float(config.load_settings().get("budget", {}).get("monthly_usd", 0.0))
+    return [
+        Check(
+            name="concept art",
+            ok=monthly < limit * 0.75,
+            detail=f"{per_video}/video at ${pricing.price_per_image(model):.3f} "
+                   f"= ${monthly:.2f}/month of the ${limit:.2f} cap",
+            fix="lower images.concepts_per_video; the script still needs its share "
+                "of the budget",
+            blocking=False,
+        )
+    ]
+
+
 def _check_nasa() -> list[Check]:
     """The material library needs no key, so this is purely a reachability check."""
     from .nasa import NasaError, search
@@ -339,6 +390,7 @@ def run_checks() -> list[Check]:
         _check_tokens,
         _check_budget,
         _check_tts_budget,
+        _check_images,
         _check_prices,
         _check_nasa,
         _check_pipeline_state,
