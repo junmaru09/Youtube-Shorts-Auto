@@ -525,6 +525,42 @@ def test_an_unknown_status_is_rejected(temp_db):
         db.set_idea_status(temp_db, idea_id, "totally-made-up")
 
 
+def test_an_assembled_video_reaches_the_review_queue(temp_db, temp_work):
+    """This looked for a `post_processed` status that no longer exists, so the
+    queue was permanently empty and nothing could ever be approved — the whole
+    pipeline was blocked at the gate with no error anywhere."""
+    idea_id = _idea(temp_db, status="assembled")
+    render = temp_work / "r.mp4"
+    render.write_bytes(b"x")
+    db.upsert_render(
+        temp_db, idea_id=idea_id, path=str(render), thumb_path=None,
+        duration_s=1080, chapters_text="",
+    )
+    temp_db.commit()
+
+    pending = db.pending_reviews(temp_db)
+    assert [row["id"] for row in pending] == [idea_id]
+
+    db.insert_review(temp_db, idea_id=idea_id, decision="approve",
+                     reason_tag=None, note=None, checks={})
+    assert db.pending_reviews(temp_db) == []
+
+
+def test_a_render_without_a_thumbnail_is_queued_for_one(temp_db, temp_work):
+    idea_id = _idea(temp_db, status="assembled")
+    render = temp_work / "r.mp4"
+    render.write_bytes(b"x")
+    db.upsert_render(
+        temp_db, idea_id=idea_id, path=str(render), thumb_path=None,
+        duration_s=1080, chapters_text="",
+    )
+    temp_db.commit()
+    assert [r["id"] for r in db.ideas_needing_thumbnails(temp_db)] == [idea_id]
+
+    db.set_render_thumb(temp_db, idea_id, "/tmp/t.jpg")
+    assert db.ideas_needing_thumbnails(temp_db) == []
+
+
 def test_sources_are_replaced_not_appended(temp_db):
     idea_id = _idea(temp_db)
     for _ in range(2):

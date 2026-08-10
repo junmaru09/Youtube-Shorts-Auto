@@ -262,6 +262,22 @@ def cmd_assemble(args: argparse.Namespace) -> int:
     return 0 if result.failed == 0 else 1
 
 
+def cmd_thumbnails(args: argparse.Namespace) -> int:
+    from .stages import thumbnails
+
+    result = thumbnails.run(limit=args.limit, idea_id=args.idea)
+    print(f"thumbnails: {result.made} 本ぶん作成, {result.failed} 失敗")
+    for detail in result.details:
+        print(f"  idea {detail['idea_id']}:")
+        for path in detail["paths"]:
+            print(f"    {path}")
+    if result.made:
+        print("  → review_app で3案を見比べ、YouTube Studio の Test & Compare にかけてください")
+    for problem in result.errors:
+        print(f"  ! {problem}", file=sys.stderr)
+    return 0 if result.failed == 0 else 1
+
+
 def cmd_build(args: argparse.Namespace) -> int:
     """Research through assemble, stopping at the first stage that produces nothing."""
     steps = [
@@ -414,6 +430,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=_positive, default=1)
     p.add_argument("--idea", type=_positive, default=None)
     p.set_defaults(func=cmd_assemble)
+
+    p = sub.add_parser("thumbnails", help="draw the three thumbnails for A/B testing")
+    p.add_argument("--limit", type=_positive, default=1)
+    p.add_argument("--idea", type=_positive, default=None, help="redraw, even if they exist")
+    p.set_defaults(func=cmd_thumbnails)
 
     p = sub.add_parser("build", help="research through assemble in one go")
     p.add_argument("--theme")

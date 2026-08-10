@@ -171,6 +171,22 @@ for idea in pending:
             except ValueError as exc:
                 st.error(str(exc))
 
+    thumbs = [a for a in assets if a["kind"] == "thumb"]
+    if thumbs:
+        st.write("**サムネイル3案** — 1枚目が投稿時に付きます。残り2枚は Studio の Test & Compare へ")
+        columns = st.columns(len(thumbs))
+        for column, thumb in zip(columns, thumbs):
+            meta = json.loads(thumb["meta_json"] or "{}")
+            if Path(thumb["path"]).exists():
+                column.image(thumb["path"], caption=meta.get("variant", ""))
+            else:
+                column.error(f"見つかりません: {thumb['path']}")
+    else:
+        st.info(
+            "サムネイルがありません。`tube-auto thumbnails --idea "
+            f"{idea_id}` で作れます。無いとYouTubeが動画から適当な1コマを選びます。"
+        )
+
     with st.expander(f"出典 {len(sources)} 件（説明欄にそのまま載ります）"):
         for source in sources:
             when = (source["published_at"] or "")[:10]

@@ -344,6 +344,37 @@ def build_video(
     return output
 
 
+def _make_thumbnails(conn, idea_id: int, idea, script_row, assets: list[dict[str, Any]]) -> None:
+    """Draw the three thumbnails.
+
+    Advisory: the video is already rendered and committed, and a video with a
+    frame YouTube chose is worth far more than no video at all. A failure here
+    leaves `thumb_path` NULL, which is exactly what `tube-auto thumbnails` looks
+    for, so the work is picked up rather than lost.
+    """
+    from . import thumbnails
+
+    try:
+        hooks = json.loads(script_row["hooks_json"] or "[]")
+        script_text = "".join(
+            line["display"]
+            for chapter in json.loads(script_row["chapters_json"])
+            for line in chapter.get("lines", [])
+        )
+        made = thumbnails.build(idea_id, idea["hook"] or "", hooks, script_text, assets)
+    except Exception as exc:  # noqa: BLE001 - never lose a finished render over a JPEG
+        log.warning("thumbnails failed for idea %d: %s", idea_id, exc)
+        return
+
+    db.replace_assets(conn, idea_id, "thumb", [
+        {"path": str(path), "order_idx": index, "license_ok": True,
+         "meta": {"variant": thumbnails.VARIANTS[index]}}
+        for index, path in enumerate(made)
+    ])
+    db.set_render_thumb(conn, idea_id, str(made[0]))
+    conn.commit()
+
+
 def run(limit: int = 1, idea_id: int | None = None) -> AssembleResult:
     from .narrate import chapter_spans
 
@@ -412,6 +443,8 @@ def run(limit: int = 1, idea_id: int | None = None) -> AssembleResult:
             )
             db.set_idea_status(conn, current_id, "assembled")
             conn.commit()
+
+            _make_thumbnails(conn, current_id, idea, script_row, assets)
 
             result.assembled += 1
             result.details.append(

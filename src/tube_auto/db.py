@@ -861,17 +861,49 @@ def delete_review(conn: sqlite3.Connection, idea_id: int) -> None:
 
 
 def pending_reviews(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    """Post-processed ideas that nobody has decided on yet."""
+    """Assembled ideas that nobody has decided on yet.
+
+    The status is `assembled`, not the `post_processed` this once looked for.
+    That status no longer exists — `set_idea_status` rejects it — so the queue was
+    permanently empty and nothing could ever be approved.
+    """
     return conn.execute(
         """
         SELECT i.*, r.path AS render_path, r.thumb_path, r.duration_s, r.chapters_text
         FROM ideas i
         JOIN renders r ON r.idea_id = i.id
         LEFT JOIN reviews v ON v.idea_id = i.id
-        WHERE i.status = 'post_processed' AND v.id IS NULL
+        WHERE i.status = 'assembled' AND v.id IS NULL
         ORDER BY i.id
         """
     ).fetchall()
+
+
+def set_render_thumb(conn: sqlite3.Connection, idea_id: int, thumb_path: str) -> None:
+    """Point a render at the thumbnail that ships with its upload."""
+    conn.execute("UPDATE renders SET thumb_path = ? WHERE idea_id = ?", (thumb_path, idea_id))
+
+
+def ideas_needing_thumbnails(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Rendered ideas with no thumbnail yet.
+
+    Without one YouTube picks a frame at random, and a random frame from a
+    twenty-minute explainer is usually a starfield with no text on it.
+    """
+    return conn.execute(
+        """
+        SELECT i.*, r.path AS render_path, r.thumb_path
+        FROM ideas i
+        JOIN renders r ON r.idea_id = i.id
+        WHERE r.thumb_path IS NULL
+          AND i.status IN ('assembled', 'approved')
+        ORDER BY i.id
+        """
+    ).fetchall()
+
+
+def render_for(conn: sqlite3.Connection, idea_id: int) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM renders WHERE idea_id = ?", (idea_id,)).fetchone()
 
 
 # --- posts & stats -----------------------------------------------------------
