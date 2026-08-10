@@ -238,6 +238,50 @@ def set_privacy(channel_id: str, video_id: str, privacy: str) -> None:
     log.info("video %s on channel '%s' is now %s", video_id, channel_id, privacy)
 
 
+def ensure_playlist(channel_id: str, title: str, description: str = "") -> str:
+    """Find or create a playlist by title, returning its id.
+
+    One playlist per theme. Sessions are what YouTube rewards, and a viewer who
+    finishes an episode is far more likely to start another from a playlist than
+    from the home page.
+    """
+    service = data_client(channel_id)
+    request = service.playlists().list(part="snippet", mine=True, maxResults=50)
+    while request is not None:
+        response = request.execute()
+        for item in response.get("items", []):
+            if item["snippet"]["title"] == title:
+                return item["id"]
+        request = service.playlists().list_next(request, response)
+
+    created = (
+        service.playlists()
+        .insert(
+            part="snippet,status",
+            body={
+                "snippet": {"title": title, "description": description},
+                "status": {"privacyStatus": "public"},
+            },
+        )
+        .execute()
+    )
+    log.info("created playlist %r on channel '%s'", title, channel_id)
+    return created["id"]
+
+
+def add_to_playlist(channel_id: str, playlist_id: str, video_id: str) -> None:
+    service = data_client(channel_id)
+    service.playlistItems().insert(
+        part="snippet",
+        body={
+            "snippet": {
+                "playlistId": playlist_id,
+                "resourceId": {"kind": "youtube#video", "videoId": video_id},
+            }
+        },
+    ).execute()
+
+
 def verify_disclosure(channel_id: str, video_ids: list[str]) -> dict[str, bool | None]:
     """Read back what YouTube recorded for the synthetic-media disclosure.
 

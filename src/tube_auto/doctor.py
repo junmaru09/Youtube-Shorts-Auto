@@ -65,19 +65,54 @@ def _check_tools() -> list[Check]:
 
 def _check_keys() -> list[Check]:
     checks = []
-    for env_var, purpose in (
-        ("GEMINI_API_KEY", "video generation"),
-        ("ANTHROPIC_API_KEY", "idea generation"),
-    ):
-        value = os.environ.get(env_var)
+    value = os.environ.get("ANTHROPIC_API_KEY")
+    checks.append(
+        Check(
+            name="ANTHROPIC_API_KEY",
+            ok=bool(value),
+            detail="set (research and script)" if value else "missing (research and script)",
+            fix="cp .env.example .env and fill it in",
+        )
+    )
+
+    # Narration authenticates through Application Default Credentials rather
+    # than a key in .env, so its absence looks different from a missing key.
+    from .tts import TTSError
+
+    try:
+        from google.cloud import texttospeech  # noqa: F401
+
+        installed = True
+    except ImportError:
+        installed = False
+
+    if not installed:
         checks.append(
             Check(
-                name=env_var,
-                ok=bool(value),
-                detail=f"set ({purpose})" if value else f"missing ({purpose})",
-                fix="cp .env.example .env and fill it in",
+                name="TTS",
+                ok=False,
+                detail="google-cloud-texttospeech is not installed",
+                fix='pip install -e "."',
             )
         )
+    else:
+        creds = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+        adc = Path.home() / ".config/gcloud/application_default_credentials.json"
+        have = bool(creds) or adc.exists()
+        checks.append(
+            Check(
+                name="TTS auth",
+                ok=have,
+                detail=(
+                    f"service account: {creds}" if creds
+                    else "application default credentials" if have
+                    else "no Google Cloud credentials"
+                ),
+                fix="gcloud auth application-default login, or set "
+                    "GOOGLE_APPLICATION_CREDENTIALS",
+            )
+        )
+        assert TTSError  # imported for the error type the stage raises
     return checks
 
 
@@ -88,12 +123,15 @@ def _check_config() -> list[Check]:
             Check(name="config", ok=False, detail=problem, fix="edit the files under config/")
             for problem in problems
         ]
+    themes = config.load_themes()
     arms = config.arms()
+    with_footage = sum(1 for t in themes if t.allow_footage)
     return [
         Check(
             name="config",
             ok=True,
-            detail=f"{len(config.load_series())} series, {len(arms)} A/B arms",
+            detail=f"{len(themes)} themes, {len(arms)} A/B arms, "
+                   f"{with_footage} allowed to use NASA video",
         )
     ]
 
@@ -183,6 +221,62 @@ def _check_prices() -> list[Check]:
     ]
 
 
+def _check_tts_budget() -> list[Check]:
+    """How much of the free character allowance this month has used.
+
+    Going over does not fail, it starts charging. A silent switch from free to
+    paid is exactly the drift the budget guard exists to make visible.
+    """
+    from .budget import month_start
+    from .tts import free_tier_state
+
+    cfg = config.load_settings().get("tts", {})
+    allowance = int(cfg.get("free_tier_chars_per_month", 1_000_000))
+    warn_at = float(cfg.get("free_tier_warn_at", 0.8))
+
+    with db.session() as conn:
+        used = db.tts_chars_since(conn, month_start())
+
+    ok, message = free_tier_state(used, allowance, warn_at)
+    return [
+        Check(
+            name="TTS free tier",
+            ok=ok,
+            detail=message,
+            fix="narration beyond the allowance is billed at $16-30 per million "
+                "characters; lower pipeline.ideas_per_day or shorten the videos",
+            blocking=False,
+        )
+    ]
+
+
+def _check_nasa() -> list[Check]:
+    """The material library needs no key, so this is purely a reachability check."""
+    from .nasa import NasaError, search
+
+    try:
+        results = search("nebula", "image", page_size=10)
+    except NasaError as exc:
+        return [
+            Check(
+                name="NASA library",
+                ok=False,
+                detail=str(exc)[:120],
+                fix="check network access to images-api.nasa.gov",
+                blocking=False,
+            )
+        ]
+    return [
+        Check(
+            name="NASA library",
+            ok=bool(results),
+            detail=f"reachable, {len(results)} cleared item(s) for a sample query",
+            fix="the rights filter may be rejecting everything; run with -v to see why",
+            blocking=False,
+        )
+    ]
+
+
 def _check_pipeline_state() -> list[Check]:
     with db.session() as conn:
         counts = db.status_counts(conn)
@@ -244,7 +338,9 @@ def run_checks() -> list[Check]:
         _check_config,
         _check_tokens,
         _check_budget,
+        _check_tts_budget,
         _check_prices,
+        _check_nasa,
         _check_pipeline_state,
     ):
         try:

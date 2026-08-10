@@ -63,13 +63,34 @@ def run(limit: int | None = None, dry_run: bool = False, verify: bool = True) ->
             db.mark_public(conn, int(post["id"]))
             conn.commit()
             result.went_public += 1
-            result.notes.append(f"https://youtube.com/shorts/{video_id} is now public")
+            result.notes.append(f"https://youtube.com/watch?v={video_id} is now public")
+
+            _add_to_theme_playlist(conn, post, video_id, result)
 
         if verify and not dry_run and result.went_public:
             _verify_disclosure(conn, batch, result)
 
         db.record_run(conn, "go-live", ok=result.failed == 0)
     return result
+
+
+def _add_to_theme_playlist(conn, post, video_id: str, result: GoLiveResult) -> None:
+    """File the video under its theme.
+
+    Advisory: a playlist that could not be created is a lost session, not a lost
+    video, and there is no reason to leave something public but unrecorded over it.
+    """
+    from .. import config
+
+    try:
+        theme = config.theme_by_id(post["series_id"])
+        playlist_id = youtube.ensure_playlist(
+            post["channel_id"], theme.description or theme.id
+        )
+        youtube.add_to_playlist(post["channel_id"], playlist_id, video_id)
+    except Exception as exc:  # noqa: BLE001 - never block going public
+        log.warning("could not add %s to its playlist: %s", video_id, exc)
+        result.notes.append(f"{video_id}: プレイリストへの追加に失敗（動画は公開済み）: {exc}")
 
 
 def _verify_disclosure(conn, posts, result: GoLiveResult) -> None:

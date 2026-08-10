@@ -4,20 +4,19 @@
 
 Nothing reaches YouTube without passing through here. That is partly quality
 control and partly compliance: YouTube's 2025 inauthentic-content rules ask
-channels to demonstrate human editorial involvement, and the reviews table is the
-audit trail. Rejection reasons feed back into the next `ideate` run.
+channels to demonstrate human editorial involvement, and the reviews table is
+the audit trail.
 
-Two things this page will not do:
-
-- **Delete a spend record.** Regenerating adds a row to the append-only ledger; it
-  never removes the one that recorded money already spent.
-- **Approve a video whose burned-in title differs from the stored one.** Editing a
-  title re-renders first and only saves on success, so the file and the metadata
-  cannot drift apart.
+The checks below are the ones no automated stage can make. Rights filtering
+reads metadata, and metadata cannot describe what is inside a frame — three
+separate test videos shipped a presenter, a NASA slate, and a third-party credit
+because of exactly that gap. A person watching for thirty seconds catches all
+three.
 """
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -28,18 +27,18 @@ from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(Path(__file__).parent / ".env")  # same TUBE_AUTO_DB as the CLI
 
-from tube_auto import config, db, ffmpeg, paths  # noqa: E402
+from tube_auto import config, db, paths  # noqa: E402
 from tube_auto.budget import month_start  # noqa: E402
-from tube_auto.stages import postprocess  # noqa: E402
 
-st.set_page_config(page_title="Shorts Review", page_icon="🎬", layout="wide")
+st.set_page_config(page_title="tube-auto review", page_icon="🔭", layout="wide")
 
-# Checked by a human, recorded as evidence. These are the failure modes no
-# prompt or negative prompt reliably prevents.
+# What a machine cannot check. Each of these has actually gone wrong.
 COMPLIANCE_CHECKS = {
-    "no_text": "映像に文字・字幕・透かしが焼き込まれていない",
-    "no_real_person": "実在の人物に見える顔が写っていない",
-    "no_banned": "シリーズの禁止事項に触れていない",
+    "no_logo": "NASAのロゴ・スレート・番組タイトルが映っていない",
+    "no_person": "特定できる人物が写っていない",
+    "no_third_party": "第三者クレジット（ESO / Hubble など）が焼き込まれていない",
+    "sources_match": "話している内容が出典と食い違っていない",
+    "reading_ok": "固有名詞・数値・単位の読み間違いがない",
 }
 
 
@@ -49,47 +48,27 @@ def _decide(idea_id: int, decision: str, reason: str | None, note: str | None, c
             conn, idea_id=idea_id, decision=decision, reason_tag=reason, note=note, checks=checks
         )
         db.set_idea_status(conn, idea_id, "approved" if decision == "approve" else "rejected")
-
-
-def _rerender_with_title(idea_id: int, new_hook: str) -> None:
-    """Re-render first, save the title only if it succeeded.
-
-    Saving first and rendering second is how the stored title and the burned-in
-    text drift apart, which then ships a video whose caption contradicts its
-    metadata.
-    """
-    with db.session() as conn:
-        idea = db.get_idea(conn, idea_id)
-        generation = db.latest_generation(conn, idea_id)
-        if idea is None or generation is None or not generation["path"]:
-            raise RuntimeError("no usable generation on record for this idea")
-
-        candidate = dict(idea)
-        candidate["hook"] = new_hook
-        video, thumb, burned = postprocess.render_for_idea(candidate, generation)
-
-        db.update_hook(conn, idea_id, new_hook)
-        db.upsert_render(
-            conn,
-            idea_id=idea_id,
-            generation_id=int(generation["id"]),
-            path=str(video),
-            thumb_path=str(thumb) if thumb else None,
-            burned_hook=burned,
-        )
         conn.commit()
 
 
 def _requeue(idea_id: int) -> None:
-    """Send an idea back for a fresh generation, keeping the plan.
+    """Send an idea back to be rebuilt from its script.
 
-    The previous generation's ledger row stays: the money was spent and the
-    budget guard must keep seeing it.
+    The spend ledger is untouched: the money was spent and the budget guard must
+    keep seeing it.
     """
     with db.session() as conn:
         db.delete_render(conn, idea_id)
         db.delete_review(conn, idea_id)
-        db.set_idea_status(conn, idea_id, "ideated")
+        db.set_idea_status(conn, idea_id, "narrated")
+        conn.commit()
+
+
+def _set_title(idea_id: int, title: str) -> None:
+    """Titles are metadata only — nothing is burned into the picture, so this
+    does not require a re-render."""
+    with db.session() as conn:
+        db.update_hook(conn, idea_id, title)
         conn.commit()
 
 
@@ -98,61 +77,67 @@ def _requeue(idea_id: int) -> None:
 settings = config.load_settings()
 reason_tags = settings.get("review", {}).get("reason_tags", [])
 
-st.title("🎬 Shorts 承認ゲート")
+st.title("🔭 承認ゲート")
 
 with db.session() as conn:
     pending = db.pending_reviews(conn)
     waiting_to_publish = len(db.publishable_ideas(conn))
     waiting_to_go_live = len(db.private_posts(conn))
-    month_spend = db.spend_breakdown(conn, month_start())
+    spend = db.spend_breakdown(conn, month_start())
+    tts_chars = db.tts_chars_since(conn, month_start())
 
 monthly_limit = float(settings.get("budget", {}).get("monthly_usd", 0.0))
+tts_allowance = int(settings.get("tts", {}).get("free_tier_chars_per_month", 1_000_000))
+yen = float(settings.get("report", {}).get("jpy_per_usd", 150))
 
-c1, c2, c3, c4 = st.columns(4)
+c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric("レビュー待ち", len(pending))
 c2.metric("投稿待ち", waiting_to_publish)
 c3.metric("private のまま", waiting_to_go_live)
-c4.metric("今月の支出", f"${month_spend['total']:.2f}", f"上限 ${monthly_limit:.0f}")
+c4.metric("今月の支出", f"¥{spend['total'] * yen:,.0f}", f"上限 ¥{monthly_limit * yen:,.0f}")
+c5.metric("TTS無料枠", f"{tts_chars / tts_allowance:.0%}", f"{tts_chars:,} 文字")
 
 if waiting_to_go_live:
     st.warning(
         f"{waiting_to_go_live} 本が private のままです。`tube-auto go-live` を実行するまで "
-        "再生されず、計測もされません。"
+        "再生されず、計測も始まりません。"
     )
 
 if not pending:
-    st.success(
-        "レビュー待ちはありません。`tube-auto ideate` → `generate` → `postprocess` を実行してください。"
-    )
+    st.success("レビュー待ちはありません。`tube-auto build` で1本作ってください。")
     st.stop()
 
 for idea in pending:
     idea_id = int(idea["id"])
-    lang = idea["lang"]
     st.divider()
-    left, right = st.columns([1, 2])
+
+    with db.session() as conn:
+        sources = [dict(s) for s in db.get_sources(conn, idea_id)]
+        script_row = db.get_script(conn, idea_id)
+        assets = [dict(a) for a in db.get_assets(conn, idea_id)]
+        narration = db.get_narration(conn, idea_id)
+
+    left, right = st.columns([3, 2])
 
     with left:
         render_path = idea["render_path"]
         if render_path and Path(render_path).exists():
             st.video(render_path)
         else:
-            st.warning(f"レンダリング結果が見つかりません: {render_path}")
+            st.error(f"レンダリング結果が見つかりません: {render_path}")
+
+        minutes = (idea["duration_s"] or 0) / 60
+        st.caption(
+            f"#{idea_id} · {idea['series_id']} · {minutes:.1f}分 · "
+            f"素材 {len(assets)}点 · 出典 {len(sources)}件"
+        )
 
     with right:
-        st.caption(f"#{idea_id} · {idea['series_id']} · → {lang} チャンネル")
-        st.write(f"**シーン**: {idea['scene_summary']}")
+        title = st.text_input("タイトル", value=idea["hook"], key=f"title_{idea_id}")
+        if (idea["why_now"] or "").strip():
+            st.caption(f"なぜ今: {idea['why_now']}")
 
-        edited = st.text_input(
-            f"タイトル [{lang}]", value=idea["hook"], key=f"hook_{idea_id}"
-        )
-        if idea["burned_hook"]:
-            st.caption(f"映像に焼き込まれている文字: {idea['burned_hook']!r}")
-
-        with st.expander("生成プロンプト"):
-            st.code(idea["video_prompt"], language="text")
-
-        st.write("**確認項目**（承認にはすべてチェックが必要です）")
+        st.write("**確認項目**（承認にはすべて必要）")
         checks = {
             key: st.checkbox(label, key=f"chk_{idea_id}_{key}")
             for key, label in COMPLIANCE_CHECKS.items()
@@ -161,24 +146,15 @@ for idea in pending:
         note = st.text_input("メモ（任意）", key=f"note_{idea_id}")
         reason = st.selectbox("却下理由", ["—", *reason_tags], key=f"reason_{idea_id}")
 
-        b1, b2, b3, b4 = st.columns(4)
-
+        b1, b2, b3 = st.columns(3)
         if b1.button("✅ 承認", key=f"ok_{idea_id}", type="primary"):
             if not all(checks.values()):
                 st.warning("確認項目すべてにチェックを入れてください。")
             else:
-                ok = True
-                if edited.strip() != (idea["hook"] or "").strip():
-                    with st.spinner("タイトルを反映して再レンダリング中…"):
-                        try:
-                            _rerender_with_title(idea_id, edited.strip())
-                        except (RuntimeError, ffmpeg.FFmpegError, ffmpeg.FFmpegMissing,
-                                ffmpeg.FontMissing) as exc:
-                            ok = False
-                            st.error(f"再レンダリングに失敗したため承認を中止しました: {exc}")
-                if ok:
-                    _decide(idea_id, "approve", None, note or None, checks)
-                    st.rerun()
+                if title.strip() != (idea["hook"] or "").strip():
+                    _set_title(idea_id, title.strip())
+                _decide(idea_id, "approve", None, note or None, checks)
+                st.rerun()
 
         if b2.button("❌ 却下", key=f"ng_{idea_id}"):
             if reason == "—":
@@ -187,25 +163,38 @@ for idea in pending:
                 _decide(idea_id, "reject", reason, note or None, checks)
                 st.rerun()
 
-        if b3.button("✏️ タイトル反映", key=f"rt_{idea_id}"):
-            with st.spinner("再レンダリング中…"):
-                try:
-                    _rerender_with_title(idea_id, edited.strip())
-                    st.rerun()
-                except (RuntimeError, ffmpeg.FFmpegError, ffmpeg.FFmpegMissing,
-                        ffmpeg.FontMissing) as exc:
-                    st.error(f"再レンダリングに失敗しました: {exc}")
-
-        if b4.button(
-            "🔄 再生成",
-            key=f"re_{idea_id}",
-            help="同じ企画で動画を作り直します。新たに課金が発生し、これまでの支出も台帳に残ります。",
-        ):
+        if b3.button("🔄 作り直す", key=f"re_{idea_id}",
+                     help="同じ台本と音声から映像を組み直します。追加の課金はありません。"):
             try:
                 _requeue(idea_id)
                 st.rerun()
             except ValueError as exc:
                 st.error(str(exc))
+
+    with st.expander(f"出典 {len(sources)} 件（説明欄にそのまま載ります）"):
+        for source in sources:
+            when = (source["published_at"] or "")[:10]
+            st.markdown(f"**[{source['ref']}]** {source['title']}  \n{source['url']}  ·  {when}")
+
+    if script_row:
+        chapters = json.loads(script_row["chapters_json"])
+        with st.expander(f"台本 {script_row['char_count']:,} 文字 / {len(chapters)} 章"):
+            for index, chapter in enumerate(chapters):
+                st.markdown(f"**{index}. {chapter['title']}**")
+                for line in chapter.get("lines", []):
+                    refs = " ".join(f"`{r}`" for r in line.get("refs", []))
+                    who = "🗣" if line["speaker"] == "explainer" else "❓"
+                    st.markdown(f"{who} {line['display']} {refs}")
+
+    with st.expander(f"素材 {len(assets)} 点（権利の記録）"):
+        for asset in assets:
+            meta = json.loads(asset["meta_json"] or "{}")
+            mark = "✅" if asset["license_ok"] else "⚠️"
+            st.markdown(
+                f"{mark} `{asset['kind']}` ch{asset['chapter']} — "
+                f"{meta.get('title', '(生成図解)')}  \n"
+                f"{asset['credit'] or '—'}  ·  {asset['source_url'] or 'in-house'}"
+            )
 
 st.divider()
 st.caption(f"DB: {paths.db_path()}")
