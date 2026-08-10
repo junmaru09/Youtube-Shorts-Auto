@@ -4,11 +4,14 @@ The audio is the spine. Every visual was planned against the narration timeline,
 so assembly is mostly a matter of laying each asset into the span it was given
 and letting the soundtrack decide the length.
 
-Three things are burned in rather than left to YouTube:
+Four things are burned in rather than left to YouTube:
 
 - **Subtitles**, because a large share of this audience watches without sound.
 - **Chapter cards**, because a twenty-minute video needs visible structure and a
   description timestamp alone does not provide it on screen.
+- **The title**, five seconds in rather than at the top. The opening five
+  seconds are the measured pattern-interrupt window; spending them on a logo
+  spends the only part of the video everyone watches.
 - **A closing card**, because the end-screen API does not exist and the next
   video has to be offered somehow.
 
@@ -27,6 +30,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .. import bgm
 from .. import brand as brand_mod
 from .. import config, db, ffmpeg, paths
 
@@ -222,6 +226,107 @@ def _chapter_card(
     return output
 
 
+CLOSING_SECONDS = 11.0
+# The title appears after the hook, not before it. A pre-roll card spends the
+# five seconds that decide whether anyone stays — the measured pattern-interrupt
+# window — on branding nobody has a reason to care about yet.
+TELOP_START = 5.0
+TELOP_SECONDS = 4.5
+
+
+def _title_telop(brand: brand_mod.Brand, title: str) -> str:
+    """A filter fragment putting the episode title on screen during the hook."""
+    if not title.strip():
+        return ""
+    try:
+        font = ffmpeg.find_font(brand.font_path)
+    except ffmpeg.FontMissing:
+        return ""
+
+    text = wrap_japanese(title.strip(), 18).replace("\n", " ")
+    size = brand.telop["keyword_size"]
+    end = TELOP_START + TELOP_SECONDS
+    box = f"boxcolor=black@0.55:box=1:boxborderw={size // 3}"
+    return (
+        f",drawtext=fontfile='{_escape(font)}':text='{_drawtext_escape(text)}'"
+        f":expansion=none:fontsize={size}:fontcolor={brand.palette['ink']}"
+        f":borderw=4:bordercolor=black@0.8:{box}"
+        f":x=(w-text_w)/2:y=h*0.16"
+        # Fade the box and text together at both ends rather than cutting.
+        f":alpha='if(lt(t,{TELOP_START}),0,"
+        f"if(lt(t,{TELOP_START + 0.4}),(t-{TELOP_START})/0.4,"
+        f"if(lt(t,{end - 0.6}),1,if(lt(t,{end}),({end}-t)/0.6,0))))'"
+    )
+
+
+def _drawtext_escape(text: str) -> str:
+    """Escape for an inline drawtext `text=` value.
+
+    Chapter cards use `textfile=` and avoid this entirely; the telop cannot,
+    because it needs to sit in the same filter graph as the subtitles.
+    """
+    for char, replacement in (("\\", r"\\"), (":", r"\:"), ("'", r"\'"), ("%", r"\%")):
+        text = text.replace(char, replacement)
+    return text
+
+
+def _closing_card(
+    output: Path, size: tuple[int, int], fps: int, brand: brand_mod.Brand
+) -> Path | None:
+    """The card the module docstring has always promised.
+
+    YouTube's end-screen has no API, so the only way to offer the next video is
+    to burn the offer into the last few seconds. Until now this was documented
+    and not implemented — the episode simply stopped on its last cut.
+    """
+    width, height = size
+    try:
+        font = ffmpeg.find_font(brand.font_path)
+    except ffmpeg.FontMissing:
+        return None
+
+    lines = [
+        (brand.channel_name, brand.telop["chapter_size"], brand.palette["accent"], 0.30),
+        (brand.tagline, brand.telop["subtitle_size"], brand.palette["sub"], 0.44),
+        ("チャンネル登録と、次の一本へ", brand.telop["subtitle_size"], brand.palette["ink"], 0.66),
+    ]
+
+    files: list[Path] = []
+    draws: list[str] = []
+    for index, (text, font_size, colour, y) in enumerate(lines):
+        if not text.strip():
+            continue
+        text_file = output.parent / f"{output.stem}_{index}.txt"
+        text_file.write_text(text, encoding="utf-8")
+        files.append(text_file)
+        draws.append(
+            f"drawtext=fontfile='{_escape(font)}':textfile='{_escape(text_file)}'"
+            f":expansion=none:fontsize={font_size}:fontcolor={colour}"
+            f":x=(w-text_w)/2:y=h*{y}"
+        )
+    draws.append(
+        f"drawbox=x=(iw-{int(width * 0.24)})/2:y={int(height * 0.56)}"
+        f":w={int(width * 0.24)}:h=6:color={brand.palette['accent']}:t=fill"
+    )
+
+    try:
+        ffmpeg._run([
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-f", "lavfi", "-i",
+            f"color={brand.palette['bg']}:s={width}x{height}:r={fps}:d={CLOSING_SECONDS}",
+            "-vf", ",".join(draws),
+            "-c:v", "libx264", "-preset", SEGMENT_PRESET, "-crf", "22",
+            "-pix_fmt", "yuv420p", str(output),
+        ], timeout=300)
+    except ffmpeg.FFmpegError as exc:
+        log.warning("closing card failed, ending on the last cut instead: %s", exc)
+        return None
+    finally:
+        for text_file in files:
+            text_file.unlink(missing_ok=True)
+    return output
+
+
 def _concat(parts: list[Path], output: Path) -> Path:
     listing = output.parent / f"{output.stem}_parts.txt"
     listing.write_text("\n".join(f"file '{p.resolve()}'" for p in parts) + "\n", encoding="utf-8")
@@ -236,19 +341,6 @@ def _concat(parts: list[Path], output: Path) -> Path:
     return output
 
 
-def _pick_bgm(bgm_dir: Path) -> Path | None:
-    """A track from the local library, or nothing.
-
-    Only files the operator put there are used. Anything from a commercial
-    catalogue would hand the video's revenue to the rights holder via Content ID,
-    which defeats the entire point.
-    """
-    if not bgm_dir.exists():
-        return None
-    tracks = sorted(p for p in bgm_dir.iterdir() if p.suffix.lower() in (".mp3", ".m4a", ".wav"))
-    return random.choice(tracks) if tracks else None
-
-
 def build_video(
     idea_id: int,
     assets: list[dict[str, Any]],
@@ -259,10 +351,12 @@ def build_video(
     chapters: list[dict[str, Any]],
     spans: list[dict[str, Any]],
     settings: dict[str, Any],
+    title_text: str = "",
 ) -> Path:
     """Lay the visuals against the audio and mix it all down."""
     video_cfg = settings.get("video", {})
     post_cfg = settings.get("postprocess", {})
+    chapter_keys = [c.key for c in brand_mod.EPISODE_PLAN]
     size = (int(video_cfg.get("width", 1920)), int(video_cfg.get("height", 1080)))
     fps = int(video_cfg.get("fps", 30))
 
@@ -297,26 +391,29 @@ def build_video(
     if not segments:
         raise ffmpeg.FFmpegError("no usable segments; nothing to assemble")
 
+    closing = _closing_card(workdir / "closing.mp4", size, fps, brand)
+    if closing is not None:
+        segments.append(closing)
+
     silent = _concat(segments, workdir / "picture.mp4")
 
     # The picture is cut to the audio, but rounding across a hundred segments
     # drifts. `-shortest` lets the narration decide the final length.
-    bgm = _pick_bgm(Path(post_cfg.get("bgm_dir", "work/bgm")))
     loudness = float(post_cfg.get("loudness_target", -14.0))
     gain = float(post_cfg.get("bgm_gain_db", -22.0))
+    bed, _plan = bgm.build_bed(
+        spans, chapter_keys, workdir / "bgm",
+        seed=str(idea_id), bgm_dir=Path(post_cfg.get("bgm_dir", "work/bgm")),
+    )
 
+    pad = CLOSING_SECONDS if closing is not None else 0.0
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
            "-i", str(silent), "-i", str(narration)]
-    if bgm:
-        cmd += ["-stream_loop", "-1", "-i", str(bgm)]
-        audio_filter = (
-            f"[1:a]aresample=48000[nar];"
-            f"[2:a]aresample=48000,volume={gain}dB[bed];"
-            f"[nar][bed]amix=inputs=2:duration=first:dropout_transition=0,"
-            f"loudnorm=I={loudness}:TP=-1.5:LRA=11[a]"
-        )
+    if bed is not None:
+        cmd += ["-i", str(bed)]
+        audio_filter = bgm.mix_filter(gain, loudness, pad)
     else:
-        audio_filter = f"[1:a]aresample=48000,loudnorm=I={loudness}:TP=-1.5:LRA=11[a]"
+        audio_filter = bgm.narration_only_filter(loudness, pad)
 
     cmd += [
         "-filter_complex",
@@ -325,7 +422,9 @@ def build_video(
         # leaves the subtitle unreadable on the bright ones.
         f"[0:v]subtitles='{_escape(subtitles)}':force_style="
         f"'FontSize=22,PrimaryColour=&H00FFFFFF,BorderStyle=4,"
-        f"BackColour=&HA0000000,Outline=0,Shadow=0,MarginV=48'[v];"
+        f"BackColour=&HA0000000,Outline=0,Shadow=0,MarginV=48'"
+        + _title_telop(brand, title_text)
+        + "[v];"
         + audio_filter,
         "-map", "[v]", "-map", "[a]",
         "-c:v", "libx264", "-preset", FINAL_PRESET, "-crf", "21",
@@ -425,6 +524,7 @@ def run(limit: int = 1, idea_id: int | None = None) -> AssembleResult:
                 build_video(
                     current_id, assets, Path(narration_row["path"]), subtitles,
                     output, brand, chapters, spans, settings,
+                    title_text=idea["hook"] or "",
                 )
             except (ffmpeg.FFmpegError, ffmpeg.FFmpegMissing, ffmpeg.FontMissing, OSError) as exc:
                 log.error("assembly failed for idea %d: %s", current_id, exc)

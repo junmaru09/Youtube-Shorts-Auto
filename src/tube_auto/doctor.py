@@ -250,6 +250,42 @@ def _check_tts_budget() -> list[Check]:
     ]
 
 
+def _check_bgm() -> list[Check]:
+    """Music cannot be fetched automatically, so its absence has to be said out
+    loud — otherwise the first episode is eighteen silent minutes and nobody
+    finds out until they watch it."""
+    from .bgm import CHAPTER_MOOD, BgmLibrary
+
+    cfg = config.load_settings().get("postprocess", {})
+    library = BgmLibrary(Path(cfg.get("bgm_dir", "work/bgm")))
+
+    if library.empty:
+        return [
+            Check(
+                name="BGM",
+                ok=False,
+                detail=f"no music in {library.root}; episodes will be narration only",
+                fix="download royalty-free tracks from the YouTube Audio Library "
+                    "(it needs a login and has no API) into work/bgm/<mood>/",
+                blocking=False,
+            )
+        ]
+
+    missing = sorted(set(CHAPTER_MOOD.values()) - set(library.by_mood))
+    return [
+        Check(
+            name="BGM",
+            ok=not missing,
+            detail=library.summary()
+            + (f"; missing moods fall back to whatever exists: {', '.join(missing)}"
+               if missing else ""),
+            fix="add a few tracks under work/bgm/<mood>/ so each chapter sounds "
+                "different from the one before it",
+            blocking=False,
+        )
+    ]
+
+
 def _check_images() -> list[Check]:
     """Concept art is the only cost here that scales with use, so it is stated
     in advance rather than discovered in the ledger."""
@@ -391,6 +427,7 @@ def run_checks() -> list[Check]:
         _check_budget,
         _check_tts_budget,
         _check_images,
+        _check_bgm,
         _check_prices,
         _check_nasa,
         _check_pipeline_state,

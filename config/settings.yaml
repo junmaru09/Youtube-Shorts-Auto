@@ -106,8 +106,20 @@ images:
 postprocess:
   font_path: null       # 未設定なら Noto Sans CJK を自動検出
   loudness_target: -14.0
-  # BGMは YouTube オーディオライブラリから事前取得したものを work/bgm/ に置く
+  # BGMは YouTube オーディオライブラリから手で落として置く（ログインが要りAPIが無い）。
+  #
+  # 章ごとに曲を変えるため、雰囲気ごとのサブフォルダに分ける:
+  #   work/bgm/tension/     つかみ
+  #   work/bgm/wonder/      今日の話・本題
+  #   work/bgm/calm/        前提・詳しく
+  #   work/bgm/reflective/  何が覆ったか
+  #   work/bgm/resolve/     まとめ
+  #
+  # 各2〜3曲あれば足りる。サブフォルダを作らず直下に置いても動く（全章で同じ候補群を使う）。
+  # 1曲も無ければBGM無しで組み上がる。
   bgm_dir: work/bgm
+  # ナレーションをキーにしたダッキング前の基準音量。
+  # 実測でダッキング量は7.7dB（放送で音楽を声の下に敷くときの標準域6〜10dB）。
   bgm_gain_db: -22.0
 
 review:
