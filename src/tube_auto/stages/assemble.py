@@ -189,7 +189,7 @@ def _segment(
         ]
 
     cmd += [
-        "-c:v", "libx264", "-preset", SEGMENT_PRESET, "-crf", "22",
+        *ffmpeg.video_args(22, SEGMENT_PRESET),
         "-pix_fmt", "yuv420p", str(output),
     ]
     ffmpeg._run(cmd, timeout=900)
@@ -218,7 +218,7 @@ def _chapter_card(
                 f",drawbox=x=(iw-420)/2:y=ih/2+90:w=420:h=3:"
                 f"color={brand.palette['accent']}:t=fill"
             ),
-            "-c:v", "libx264", "-preset", SEGMENT_PRESET, "-crf", "22",
+            *ffmpeg.video_args(22, SEGMENT_PRESET),
             "-pix_fmt", "yuv420p", str(output),
         ])
     finally:
@@ -315,7 +315,7 @@ def _closing_card(
             "-f", "lavfi", "-i",
             f"color={brand.palette['bg']}:s={width}x{height}:r={fps}:d={CLOSING_SECONDS}",
             "-vf", ",".join(draws),
-            "-c:v", "libx264", "-preset", SEGMENT_PRESET, "-crf", "22",
+            *ffmpeg.video_args(22, SEGMENT_PRESET),
             "-pix_fmt", "yuv420p", str(output),
         ], timeout=300)
     except ffmpeg.FFmpegError as exc:
@@ -427,7 +427,7 @@ def build_video(
         + "[v];"
         + audio_filter,
         "-map", "[v]", "-map", "[a]",
-        "-c:v", "libx264", "-preset", FINAL_PRESET, "-crf", "21",
+        *ffmpeg.video_args(21, FINAL_PRESET),
         "-pix_fmt", "yuv420p",
         # loudnorm resamples internally and will happily emit 96 kHz if left to
         # itself, which YouTube then re-encodes. Pin the output rate.

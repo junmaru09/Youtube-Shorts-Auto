@@ -250,6 +250,45 @@ def _check_tts_budget() -> list[Check]:
     ]
 
 
+def _check_encoder() -> list[Check]:
+    """Which encoder assembly will actually use.
+
+    Worth stating plainly: the encoder is the difference between an 18-minute
+    render taking minutes and taking most of an hour, and a stock ffmpeg build
+    advertises encoders for hardware that is not present.
+    """
+    from . import ffmpeg
+
+    configured = ffmpeg.configured_encoder()
+    try:
+        resolved = ffmpeg.resolve_encoder(configured)
+    except ffmpeg.FFmpegError as exc:
+        return [Check(name="encoder", ok=False, detail=str(exc)[:160],
+                      fix="fix video.encoder in config/settings.yaml")]
+
+    if resolved != "libx264":
+        detail = f"{resolved} (hardware)"
+    elif configured == "auto":
+        compiled = [e for e in ffmpeg.available_encoders() if e != "libx264"]
+        detail = "libx264 (CPU)" + (
+            f"; {', '.join(compiled)} compiled in but no working hardware found"
+            if compiled else "; no hardware encoder compiled in"
+        )
+    else:
+        detail = "libx264 (CPU, set explicitly)"
+
+    return [
+        Check(
+            name="encoder",
+            ok=True,
+            detail=detail,
+            fix="a desktop CPU is usually fast enough; set video.encoder to "
+                "h264_nvenc / h264_amf / h264_qsv to force hardware",
+            blocking=False,
+        )
+    ]
+
+
 def _check_bgm() -> list[Check]:
     """Music cannot be fetched automatically, so its absence has to be said out
     loud — otherwise the first episode is eighteen silent minutes and nobody
@@ -427,6 +466,7 @@ def run_checks() -> list[Check]:
         _check_budget,
         _check_tts_budget,
         _check_images,
+        _check_encoder,
         _check_bgm,
         _check_prices,
         _check_nasa,

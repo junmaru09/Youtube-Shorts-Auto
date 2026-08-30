@@ -40,6 +40,18 @@ publish:
   channel_started_on: null
 
 video:
+  # 映像エンコーダ。auto は実際に1フレーム試し焼きして使えるものを選ぶ
+  # （ffmpegが「対応」と表示しても、そのGPUが刺さっているとは限らないため）。
+  #
+  #   auto        自動検出（既定）
+  #   libx264     CPU。どこでも動く。デスクトップCPUなら十分速い
+  #   h264_nvenc  NVIDIA（RTX 4070 Ti など）
+  #   h264_amf    AMD。Windowsのみ。AMF入りのffmpegビルドが要る（gyan.dev版など）
+  #   h264_qsv    Intel内蔵GPU
+  #
+  # AMD + Linux は VAAPI が本来の解だが、フィルタグラフ全体に hwupload を
+  # 入れる必要があるため未対応。libx264 のままになる。
+  encoder: auto
   target_minutes: 18
   width: 1920
   height: 1080

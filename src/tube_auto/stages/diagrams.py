@@ -267,7 +267,7 @@ def render(
             "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
             "-framerate", str(RENDER_FPS), "-i", str(frames_dir / "%05d.png"),
             "-vf", f"fps={FPS},scale={width}:{height}",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            *ffmpeg.video_args(20, "veryfast"),
             "-pix_fmt", "yuv420p", str(output),
         ])
     finally:
@@ -342,7 +342,7 @@ def render_concept(
             f"y='ih/2-(ih/zoom/2)':s={width}x{height}:fps={FPS},"
             f"setsar=1",
             "-frames:v", str(frames), "-an",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            *ffmpeg.video_args(20, "veryfast"),
             "-pix_fmt", "yuv420p", str(output),
         ], timeout=300)
     finally:

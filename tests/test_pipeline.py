@@ -694,3 +694,74 @@ def test_watch_hours_come_from_length_and_retention_not_views(temp_db, temp_work
     # 1000 views x 1080 s x 0.30 / 3600 = 90 hours
     assert report.watch_hours == pytest.approx(90.0, rel=0.01)
     assert report.videos_live == 1
+
+
+# --- video encoders -----------------------------------------------------------
+
+
+def test_a_listed_encoder_is_not_assumed_to_work(monkeypatch):
+    """A stock ffmpeg build advertises h264_nvenc on a machine with no NVIDIA
+    card. Trusting the list picks an encoder that fails mid-render."""
+    from tube_auto import ffmpeg
+
+    ffmpeg.reset_encoder_cache()
+    monkeypatch.setattr(ffmpeg, "available_encoders", lambda: ["libx264", "h264_nvenc"])
+    monkeypatch.setattr(ffmpeg, "encoder_works", lambda name: name == "libx264")
+    assert ffmpeg.resolve_encoder("auto") == "libx264"
+    ffmpeg.reset_encoder_cache()
+
+
+def test_working_hardware_is_preferred_over_the_cpu(monkeypatch):
+    from tube_auto import ffmpeg
+
+    ffmpeg.reset_encoder_cache()
+    monkeypatch.setattr(ffmpeg, "available_encoders", lambda: ["libx264", "h264_amf"])
+    monkeypatch.setattr(ffmpeg, "encoder_works", lambda name: True)
+    assert ffmpeg.resolve_encoder("auto") == "h264_amf"
+    ffmpeg.reset_encoder_cache()
+
+
+def test_an_explicit_encoder_is_used_without_probing(monkeypatch):
+    """Probing spawns ffmpeg; an operator who already knows their hardware
+    should not pay for that on every call."""
+    from tube_auto import ffmpeg
+
+    monkeypatch.setattr(ffmpeg, "encoder_works", lambda name: pytest.fail("must not probe"))
+    assert ffmpeg.resolve_encoder("h264_nvenc") == "h264_nvenc"
+
+
+def test_an_unknown_encoder_is_refused_by_name():
+    from tube_auto import ffmpeg
+
+    with pytest.raises(ffmpeg.FFmpegError, match="unknown video.encoder"):
+        ffmpeg.resolve_encoder("h264_magic")
+
+
+@pytest.mark.parametrize("name", ["libx264", "h264_nvenc", "h264_amf", "h264_qsv"])
+def test_every_encoder_maps_the_quality_number(name):
+    """Only libx264 has CRF; the hardware encoders each spell their quantiser
+    differently, and a flag that lands on the wrong encoder is ignored rather
+    than rejected."""
+    from tube_auto import ffmpeg
+
+    args = ffmpeg.video_args(21, "veryfast", configured=name)
+    assert args[:2] == ["-c:v", name]
+    assert "21" in args
+
+
+def test_nvenc_pins_the_bitrate_to_zero():
+    """Without `-b:v 0`, NVENC ignores -cq and targets a default bitrate."""
+    from tube_auto import ffmpeg
+
+    args = ffmpeg.video_args(21, configured="h264_nvenc")
+    assert args[args.index("-b:v") + 1] == "0"
+
+
+def test_a_broken_config_still_renders(monkeypatch):
+    from tube_auto import config, ffmpeg
+
+    def _boom():
+        raise config.ConfigError("settings.yaml is unreadable")
+
+    monkeypatch.setattr(config, "load_settings", _boom)
+    assert ffmpeg.configured_encoder() == "auto"

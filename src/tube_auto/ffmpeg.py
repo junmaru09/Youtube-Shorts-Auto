@@ -35,6 +35,132 @@ SHORTS_WIDTH = 1080
 SHORTS_HEIGHT = 1920
 DEFAULT_TIMEOUT_SECONDS = 600
 
+# ---------------------------------------------------------------------------
+# Video encoders
+#
+# Quality is expressed as one number on a CRF-like scale (lower is better) and
+# translated per encoder, because only libx264 actually has CRF. The hardware
+# encoders take a quantiser instead, and each spells it differently.
+#
+# VAAPI is deliberately absent. It is the right answer for AMD on Linux, but it
+# needs `-vaapi_device` plus `hwupload` inside every filter graph — and this
+# pipeline's graphs already carry subtitles, drawtext, zoompan and sidechain
+# audio. Adding a hardware upload to each is a much larger change than swapping
+# `-c:v`, so AMD on Linux stays on libx264 until that is worth doing.
+# ---------------------------------------------------------------------------
+
+def _x264(quality: int, preset: str) -> list[str]:
+    return ["-c:v", "libx264", "-preset", preset, "-crf", str(quality)]
+
+
+def _nvenc(quality: int, preset: str) -> list[str]:
+    # p1 fastest .. p7 slowest. p5 with `-tune hq` is the usual quality/speed
+    # knee; `-b:v 0` is required or -cq is ignored and NVENC targets a bitrate.
+    return ["-c:v", "h264_nvenc", "-preset", "p5", "-tune", "hq",
+            "-rc", "vbr", "-cq", str(quality), "-b:v", "0"]
+
+
+def _amf(quality: int, preset: str) -> list[str]:
+    return ["-c:v", "h264_amf", "-quality", "quality", "-rc", "cqp",
+            "-qp_i", str(quality), "-qp_p", str(quality)]
+
+
+def _qsv(quality: int, preset: str) -> list[str]:
+    return ["-c:v", "h264_qsv", "-preset", "slow", "-global_quality", str(quality)]
+
+
+VIDEO_ENCODERS = {
+    "libx264": _x264,
+    "h264_nvenc": _nvenc,
+    "h264_amf": _amf,
+    "h264_qsv": _qsv,
+}
+
+# Hardware first, most-preferred first. libx264 is the floor and always works.
+ENCODER_PREFERENCE = ("h264_nvenc", "h264_amf", "h264_qsv", "libx264")
+
+_encoder_cache: str | None = None
+
+
+def available_encoders() -> list[str]:
+    """Encoders this ffmpeg was compiled with. Says nothing about the hardware."""
+    try:
+        listing = _run(["ffmpeg", "-hide_banner", "-encoders"], timeout=30)
+    except (FFmpegError, FFmpegMissing):
+        return ["libx264"]
+    return [name for name in VIDEO_ENCODERS if f" {name} " in listing]
+
+
+def encoder_works(name: str) -> bool:
+    """Encode one real frame with it.
+
+    Listing an encoder is not evidence the hardware exists — a stock ffmpeg
+    build advertises `h264_nvenc` on a machine with no NVIDIA card at all, and
+    the failure only appears once a render is already underway.
+    """
+    if name == "libx264":
+        return True
+    try:
+        _run([
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-f", "lavfi", "-i", "color=c=black:s=320x240:r=30",
+            "-frames:v", "1", *VIDEO_ENCODERS[name](24, "veryfast"),
+            "-pix_fmt", "yuv420p", "-f", "null", "-",
+        ], timeout=60)
+        return True
+    except (FFmpegError, FFmpegMissing, KeyError):
+        return False
+
+
+def resolve_encoder(configured: str = "auto") -> str:
+    """Which encoder to use. Probed once per process."""
+    global _encoder_cache
+
+    if configured and configured != "auto":
+        if configured not in VIDEO_ENCODERS:
+            raise FFmpegError(
+                f"unknown video.encoder {configured!r}; "
+                f"choose one of: auto, {', '.join(VIDEO_ENCODERS)}"
+            )
+        return configured
+
+    if _encoder_cache is None:
+        compiled = set(available_encoders())
+        for candidate in ENCODER_PREFERENCE:
+            if candidate in compiled and encoder_works(candidate):
+                _encoder_cache = candidate
+                break
+        else:
+            _encoder_cache = "libx264"
+        if _encoder_cache != "libx264":
+            log.info("using hardware encoder %s", _encoder_cache)
+    return _encoder_cache
+
+
+def reset_encoder_cache() -> None:
+    global _encoder_cache
+    _encoder_cache = None
+
+
+def configured_encoder() -> str:
+    """`video.encoder` from settings, or "auto" if the config cannot be read."""
+    try:
+        from . import config
+
+        return str(config.load_settings().get("video", {}).get("encoder", "auto"))
+    except Exception:  # noqa: BLE001 - a missing config must not stop a render
+        return "auto"
+
+
+def video_args(quality: int, preset: str = "veryfast", configured: str | None = None) -> list[str]:
+    """The `-c:v` and quality flags for whichever encoder is in use.
+
+    Reads the setting itself rather than taking it as a parameter, so the six
+    call sites across assembly and diagrams do not each have to thread it down.
+    """
+    name = resolve_encoder(configured or configured_encoder())
+    return VIDEO_ENCODERS[name](quality, preset)
+
 
 class FFmpegError(RuntimeError):
     """ffmpeg or ffprobe exited non-zero, or timed out."""
@@ -154,7 +280,7 @@ def render_short(
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
         "-i", str(source),
         "-vf", ",".join(filters),
-        "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+        *video_args(20, "medium"),
         "-pix_fmt", "yuv420p",
         "-movflags", "+faststart",
     ]
