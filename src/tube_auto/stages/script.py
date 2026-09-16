@@ -49,12 +49,20 @@ SCRIPT_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "hooks": {
-                "type": "array",
-                "minItems": 3,
-                "maxItems": 3,
-                "items": {"type": "string"},
-                "description": "冒頭5秒で言い切る一文を3案。予想を裏切る数字か問い。それぞれ違う切り口にすること。",
+            # Three named fields rather than an array of three: strict mode
+            # only accepts minItems of 0 or 1, so "exactly three" cannot be
+            # expressed on an array. Three required strings can.
+            "hook_1": {
+                "type": "string",
+                "description": "冒頭5秒で言い切る一文、1案目。予想を裏切る数字か問い。",
+            },
+            "hook_2": {
+                "type": "string",
+                "description": "2案目。1案目と違う切り口。",
+            },
+            "hook_3": {
+                "type": "string",
+                "description": "3案目。1・2案目と違う切り口。",
             },
             "chapters": {
                 "type": "array",
@@ -100,7 +108,7 @@ SCRIPT_TOOL = {
                 },
             },
         },
-        "required": ["hooks", "chapters"],
+        "required": ["hook_1", "hook_2", "hook_3", "chapters"],
         "additionalProperties": False,
     },
 }
@@ -177,7 +185,7 @@ def _user_prompt(idea, sources, plan: list[dict[str, Any]], target_chars: int) -
         "",
         f"1行は1〜2文、{CHARS_PER_LINE}文字前後。各章の行数を満たすと spoken の合計が約{target_chars}文字になります。",
         "行数が足りない台本は自動で差し戻され、書き直しの費用がかかります。",
-        "hooks は必ず3案。submit_script で提出してください。",
+        "hook_1〜hook_3 の3案はそれぞれ違う切り口で。submit_script で提出してください。",
     ]
     return "\n".join(parts)
 
@@ -226,7 +234,12 @@ def _parse(payload: dict[str, Any]) -> Script:
         )
         for chapter in payload.get("chapters", [])
     ]
-    return Script(chapters=chapters, hooks=[h.strip() for h in payload.get("hooks", [])])
+    hooks = [
+        str(payload.get(key, "")).strip()
+        for key in ("hook_1", "hook_2", "hook_3")
+        if str(payload.get(key, "")).strip()
+    ]
+    return Script(chapters=chapters, hooks=hooks)
 
 
 def validate(script: Script, known_refs: set[str], target_chars: int) -> list[str]:

@@ -114,7 +114,7 @@ def test_the_length_target_is_expressed_as_lines_the_model_can_count():
         {"hook": "t", "scene_summary": "q"}, [], plan, 7200
     )
     assert "行数は必ず満たす" in prompt
-    assert "hooks は必ず3案" in prompt
+    assert "hook_1〜hook_3" in prompt
 
 
 def test_the_script_tool_is_strict():
