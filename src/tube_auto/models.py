@@ -23,10 +23,15 @@ IDEA_STATUSES = (
 
 TERMINAL_STATUSES = ("rejected", "live", "failed")
 
-# Who says a line. The explainer carries the video; the listener interjects only
-# at chapter turns and hard spots, which keeps the script from drifting into the
-# stilted back-and-forth that fully-scripted dialogue produces.
+# Who says a line. The explainer carries the video; the listener is the
+# viewer's stand-in — objecting, paraphrasing, being surprised, asking the
+# next question — and speaks about a quarter of the lines, as in the
+# reference channel.
 SPEAKERS = ("explainer", "listener")
+
+# Sprite expressions a line may ask for. Each needs <expression>_open.png and
+# <expression>_closed.png in the character's sprite folder.
+EXPRESSIONS = ("normal", "happy", "surprised", "thinking", "sad")
 
 
 @dataclass(slots=True)
@@ -117,6 +122,12 @@ class Line:
     display: str
     spoken: str
     refs: list[str] = field(default_factory=list)
+    # What the stage does while this line is spoken: the DSL lines the model
+    # wrote, and the operations they parse to (see canvas/dsl.py). Kept both
+    # ways so a stored script can be re-rendered without re-parsing.
+    visual: list[str] = field(default_factory=list)
+    ops: list[dict[str, Any]] = field(default_factory=list)
+    expression: str = "normal"
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -124,14 +135,30 @@ class Line:
             "display": self.display,
             "spoken": self.spoken,
             "refs": self.refs,
+            "visual": self.visual,
+            "ops": self.ops,
+            "expression": self.expression,
         }
+
+    @classmethod
+    def from_dict(cls, line: dict[str, Any]) -> Line:
+        return cls(
+            speaker=line["speaker"],
+            display=line["display"],
+            spoken=line["spoken"],
+            refs=line.get("refs", []),
+            visual=line.get("visual", []),
+            ops=line.get("ops", []),
+            expression=line.get("expression", "normal") or "normal",
+        )
 
 
 @dataclass(slots=True)
 class Chapter:
     title: str
-    visual_intent: str = ""  # what the footage search should look for
+    visual_intent: str = ""  # English search phrase for a photo to dim behind the stage
     lines: list[Line] = field(default_factory=list)
+    key: str = ""            # which slot of the episode skeleton this fills
 
     @property
     def display_text(self) -> str:
@@ -143,6 +170,7 @@ class Chapter:
 
     def as_dict(self) -> dict[str, Any]:
         return {
+            "key": self.key,
             "title": self.title,
             "visual_intent": self.visual_intent,
             "lines": [line.as_dict() for line in self.lines],
@@ -153,15 +181,8 @@ class Chapter:
         return cls(
             title=data["title"],
             visual_intent=data.get("visual_intent", ""),
-            lines=[
-                Line(
-                    speaker=line["speaker"],
-                    display=line["display"],
-                    spoken=line["spoken"],
-                    refs=line.get("refs", []),
-                )
-                for line in data.get("lines", [])
-            ],
+            lines=[Line.from_dict(line) for line in data.get("lines", [])],
+            key=data.get("key", ""),
         )
 
 

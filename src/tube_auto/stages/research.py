@@ -62,7 +62,24 @@ TOPIC_TOOL = {
                 },
             },
         },
-        "required": ["title", "angle", "why_now", "source_indices", "chapter_plan"],
+            "history": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "who": {"type": "string", "description": "人物名または研究チーム。日本語表記。"},
+                        "year": {"type": "integer", "description": "西暦。"},
+                        "what": {"type": "string", "description": "日本語で1文。何に気づいたか、何を発表したか。"},
+                    },
+                    "required": ["who", "year", "what"],
+                },
+                "description": (
+                    "発見史の材料。この話に至るまでに誰が・いつ・何に気づいたか、3〜6件を古い順に。"
+                    "教科書や百科事典にある一般知識の範囲に限り、確信のないものは入れない。"
+                ),
+            },
+        },
+        "required": ["title", "angle", "why_now", "source_indices", "chapter_plan", "history"],
     },
 }
 
@@ -93,6 +110,8 @@ def _system_prompt(theme: ThemeConfig, brand) -> str:
 - 束ねる項目どうしが実際に関係していること。無関係なものを並べない。
 - 過去の企画と、扱う問いが重ならないこと。
 - タイトルで断定しない。「〜が判明」より「〜はどこまで分かったのか」。
+- history には、この話の「発見の物語」を書くための人物と年を入れる。台本はここから
+  「誰が・いつ・何に気づいたか」の章を作る。確信のない人名や年は入れない。
 
 このテーマで禁止されていること:
 {chr(10).join('- ' + b for b in theme.banned)}"""
@@ -213,6 +232,7 @@ def run(
             chosen = _resolve_sources(plan.get("source_indices", []), items, wanted, result, arm_key)
             if chosen is None:
                 continue
+            chosen += _history_sources(plan.get("history", []), start=len(chosen) + 1)
 
             record = _store(conn, theme, arm, plan, chosen, dry_run, result)
             if record is not None:
@@ -220,6 +240,29 @@ def run(
                 recent.append(plan["angle"])
 
     return result
+
+
+def _history_sources(history: list[dict[str, Any]], start: int) -> list[Source]:
+    """Discovery-history entries as citable refs.
+
+    The script's citation check demands a ref on every year, and rightly so.
+    History the model supplies is textbook knowledge, not a primary source, so
+    it is stored with kind "background" — listed apart from the primary
+    sources in the description, but citable, so "1964年、ハーランドは" can
+    carry [S6] instead of being rejected.
+    """
+    sources = []
+    for i, entry in enumerate(history[:6], start=start):
+        who = str(entry.get("who", "")).strip()
+        what = str(entry.get("what", "")).strip()
+        year = entry.get("year")
+        if not who or not what or not year:
+            continue
+        sources.append(Source(
+            ref=f"S{i}", kind="background", url="", title=f"{year}年 {who}",
+            published_at=f"{int(year):04d}-01-01", summary=what,
+        ))
+    return sources
 
 
 def _resolve_sources(

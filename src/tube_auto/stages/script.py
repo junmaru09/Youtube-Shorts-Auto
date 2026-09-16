@@ -26,8 +26,10 @@ from typing import Any
 
 from .. import brand as brand_mod
 from .. import citations, config, db, reading
+from ..canvas import Canvas, CanvasError, dsl
+from ..canvas.manual import VISUAL_MANUAL
 from ..llm import LLMClient
-from ..models import Chapter, Line, Script
+from ..models import EXPRESSIONS, Chapter, Line, Script
 
 log = logging.getLogger(__name__)
 
@@ -77,7 +79,10 @@ SCRIPT_TOOL = {
                         "title": {"type": "string", "description": "日本語の章タイトル。15文字以内。"},
                         "visual_intent": {
                             "type": "string",
-                            "description": "English search terms for footage matching this chapter.",
+                            "description": (
+                                "この章の図の後ろに暗く敷く写真の英語検索語（例: 'antarctica glacier', 'milky way'）。"
+                                "羊皮紙や部屋の背景でよければ空文字。"
+                            ),
                         },
                         "lines": {
                             "type": "array",
@@ -101,8 +106,21 @@ SCRIPT_TOOL = {
                                         "items": {"type": "string"},
                                         "description": "この行の数値の出典ID（S1など）。数値がなければ空配列。",
                                     },
+                                    "visual": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                        "description": (
+                                            "この行を話す間に板へ行う操作、1操作1要素、1〜3個。"
+                                            "書式は「図の書き方」の通り。板を変えないなら ['hold']。"
+                                        ),
+                                    },
+                                    "expression": {
+                                        "type": "string",
+                                        "enum": list(EXPRESSIONS),
+                                        "description": "話者の表情。",
+                                    },
                                 },
-                                "required": ["speaker", "display", "spoken", "refs"],
+                                "required": ["speaker", "display", "spoken", "refs", "visual", "expression"],
                                 "additionalProperties": False,
                             },
                         },
@@ -138,16 +156,27 @@ def _system_prompt(brand: brand_mod.Brand, theme, target_chars: int) -> str:
 - {explainer.name}（explainer）: {explainer.persona}
 - {listener.name}（listener）: {listener.persona}
 
-話し方の設計:
-- 基本は explainer が語る。listener は章の変わり目と、視聴者がつまずくところで
-  **1〜2文だけ**質問する。相槌や合いの手は入れない。
-- 掛け合いを続けない。listener が2回続けて話すことはない。
-- 1行は1〜2文。長い段落にしない。
+会話の設計（これが番組の骨格です）:
+- listener は視聴者の代わり。役割は4つ: 反論「そう言われても実感がないわ」、
+  言い換え「要するに〜ってことなのね」、驚き「え、本当にそんなことが？」、次の疑問。
+  全体の**4分の1前後**（20〜40%）を listener が話す。相槌だけの行は禁止。
+- 「章末は疑問で終える」と指定された章は、最後の行を疑問文にする。次の章がそれに答える。
+- 冒頭の章では本題の名前も論文の結論も言わない。身近な観察から入り、explainer が逆説を返す。
+- 専門用語は、図で描けて身近な例で言い直せるものだけ使う。数式名・手法名・論文の実験条件は出さない。
+- 1行は1〜2文。長い段落にしない。最後の行は「{brand.closing_line}」。
+
+図の設計（最重要。視聴者はここで動画の質を判断します）:
+- **1行につき板を1手動かす**。同じ絵のまま3行以上話さない（hold の連続は2行まで）。
+- 図は積み上げる。置く→矢印→ラベル→強調、と行ごとに1手ずつ。1つの図に10行かけてよい。
+- 文字の箇条書き（list_add）に逃げない。関係は arrow、対比は columns/table、割合は pie、時間は timeline。
+- ラベルは12文字以内。長い説明は台詞に任せる。
+- 章の最初の行は clear から。背景は章ごとに background で決める（部屋=room、宇宙=space、それ以外=parchment）。
+
+{VISUAL_MANUAL}
 
 このチャンネルの視点:
-- 最終章では必ず「{brand.signature_question}」に答える。これが他と違う点です。
+- 「未解決」の章では必ず「{brand.signature_question}」に答える。
 - 分かっていないことは「分かっていない」と言う。断定で埋めない。
-- 最後は「{brand.closing_line}」で締める。
 
 {citations.CITATION_RULES}
 
@@ -183,13 +212,16 @@ def _user_prompt(idea, sources, plan: list[dict[str, Any]], target_chars: int) -
         parts.append(
             f"  {chapter['key']}: {chapter['title']} — {chapter['covers']}"
             f"（{chapter['lines']}行・約{chapter['chars']}文字）"
+            + (f"\n      図: {chapter['visual']}" if chapter.get("visual") else "")
+            + ("\n      章末は疑問で終える" if chapter.get("ends_with_question") else "")
         )
 
     parts += [
         "",
         f"1行は1〜2文、{CHARS_PER_LINE}文字前後。各章の行数を満たすと spoken の合計が約{target_chars}文字になります。",
-        "行数が足りない台本は自動で差し戻され、書き直しの費用がかかります。",
-        "hook_1〜hook_3 の3案はそれぞれ違う切り口で。submit_script で提出してください。",
+        "行数が足りない台本、図の参照が壊れている台本、listener が少なすぎる台本は自動で差し戻され、"
+        "書き直しの費用がかかります。",
+        "hook_1〜hook_3 は雑談導入の最初の一言の3案（本題名を出さない）。submit_script で提出してください。",
     ]
     return "\n".join(parts)
 
@@ -211,6 +243,8 @@ def _chapter_plan(idea_plan: list[dict[str, Any]] | None, target_chars: int) -> 
                 "title": supplied.get("title") or chapter.title,
                 "covers": supplied.get("covers") or chapter.intent,
                 "visual_intent": supplied.get("visual_intent", ""),
+                "visual": chapter.visual,
+                "ends_with_question": chapter.ends_with_question,
                 "chars": int(target_chars * chapter.share),
                 # A line count is something the model can actually hit; a
                 # character total is not. Asked only for 7,200 characters it
@@ -224,6 +258,7 @@ def _chapter_plan(idea_plan: list[dict[str, Any]] | None, target_chars: int) -> 
 def _parse(payload: dict[str, Any]) -> Script:
     chapters = [
         Chapter(
+            key=chapter.get("key", ""),
             title=chapter["title"],
             visual_intent=chapter.get("visual_intent", ""),
             lines=[
@@ -232,6 +267,8 @@ def _parse(payload: dict[str, Any]) -> Script:
                     display=line["display"].strip(),
                     spoken=line["spoken"].strip(),
                     refs=[r.strip() for r in line.get("refs", []) if r.strip()],
+                    visual=[v.strip() for v in line.get("visual", []) if v.strip()],
+                    expression=line.get("expression", "normal") or "normal",
                 )
                 for line in chapter.get("lines", [])
             ],
@@ -246,12 +283,83 @@ def _parse(payload: dict[str, Any]) -> Script:
     return Script(chapters=chapters, hooks=hooks)
 
 
-def validate(script: Script, known_refs: set[str], target_chars: int) -> list[str]:
+# The listener's share of lines. The reference channel runs 25-35%; below the
+# floor it is a monologue, above the ceiling it is a sitcom.
+LISTENER_SHARE = (0.15, 0.45)
+# Lines in a row that leave the stage untouched before it counts as static.
+MAX_HOLD_RUN = 2
+
+
+def check_visuals(script: Script) -> list[str]:
+    """Parse every line's visual DSL and dry-run it on a canvas.
+
+    Populates `line.ops` as a side effect, so the stored script carries the
+    parsed operations. A broken reference ("arrow from=ice3" when ice3 was
+    never placed) is caught here, before narration is paid for, with the
+    chapter and line it sits on.
+    """
+    problems: list[str] = []
+    canvas = Canvas()
+    hold_run = 0
+    for ci, chapter in enumerate(script.chapters):
+        for li, line in enumerate(chapter.lines):
+            where = f"{chapter.key or ci}:{li + 1}「{line.display[:14]}」"
+            try:
+                ops = dsl.parse_many(line.visual) if line.visual else [{"op": "hold"}]
+            except dsl.DSLError as exc:
+                problems.append(f"{where} の visual が読めない: {exc}")
+                continue
+            line.ops = ops
+            for op in ops:
+                try:
+                    canvas.apply(op)
+                except CanvasError as exc:
+                    problems.append(f"{where} の visual が適用できない: {exc}")
+                    break
+            if all(op["op"] in ("hold", "expression") for op in ops):
+                hold_run += 1
+                if hold_run == MAX_HOLD_RUN + 1:
+                    problems.append(f"{where} で板が{MAX_HOLD_RUN + 1}行以上動いていない（1行1手で図を育てること）")
+            else:
+                hold_run = 0
+    return problems[:8]
+
+
+def check_structure(script: Script, plan: list[dict[str, Any]]) -> list[str]:
+    """The shape rules: listener share, question endings, clear at chapter start."""
+    problems: list[str] = []
+    lines = [line for c in script.chapters for line in c.lines]
+    if not lines:
+        return problems
+    share = sum(1 for line in lines if line.speaker == "listener") / len(lines)
+    lo, hi = LISTENER_SHARE
+    if share < lo:
+        problems.append(f"listener の発話が{share:.0%}しかない（{lo:.0%}以上）。反論・言い換え・驚き・疑問を入れること")
+    elif share > hi:
+        problems.append(f"listener の発話が{share:.0%}と多すぎる（{hi:.0%}以下）")
+
+    wants_question = {c["key"] for c in plan if c.get("ends_with_question")}
+    for chapter in script.chapters:
+        if not chapter.lines:
+            continue
+        if chapter.key in wants_question and not chapter.lines[-1].display.rstrip().endswith(("？", "?")):
+            problems.append(f"章 {chapter.key} は疑問で終えること（最後の行「{chapter.lines[-1].display[:20]}」）")
+        first = chapter.lines[0].ops or []
+        if chapter.key and first and first[0].get("op") not in ("clear", "background"):
+            problems.append(f"章 {chapter.key} の最初の行は clear から始めること")
+    return problems
+
+
+def validate(script: Script, known_refs: set[str], target_chars: int,
+             plan: list[dict[str, Any]] | None = None) -> list[str]:
     """Everything wrong with this script, in the order it would hurt."""
     problems: list[str] = []
 
     if not script.chapters:
         return ["台本に章がひとつもない"]
+
+    problems += check_visuals(script)
+    problems += check_structure(script, plan or [])
 
     report = citations.check([c.as_dict() for c in script.chapters], known_refs)
     if not report.ok:
@@ -282,14 +390,6 @@ def validate(script: Script, known_refs: set[str], target_chars: int) -> list[st
 
     if len(script.hooks) < 3:
         problems.append(f"冒頭案が{len(script.hooks)}件しかない（3件必要）")
-
-    # The listener exists to break up the monologue; a script where they never
-    # speak is the monotone that drives 20-minute retention down.
-    listener_lines = sum(
-        1 for c in script.chapters for line in c.lines if line.speaker == "listener"
-    )
-    if listener_lines == 0:
-        problems.append("listener の発話がゼロ。単調になるので章の変わり目に入れること")
 
     return problems
 
@@ -383,7 +483,7 @@ def run(
                 result.llm_cost_usd += response.cost_usd
 
             script = _parse(response.payload)
-            problems = validate(script, known_refs, target_chars)
+            problems = validate(script, known_refs, target_chars, plan)
             if problems:
                 log.error("idea %d rejected: %s", current_id, "; ".join(problems))
                 result.rejected += 1

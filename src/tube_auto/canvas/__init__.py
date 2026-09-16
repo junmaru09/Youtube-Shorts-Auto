@@ -146,7 +146,13 @@ class Canvas:
         kind = op.get("op")
         if kind not in OPS:
             raise CanvasError(f"unknown op {kind!r}; one of {OPS}")
-        getattr(self, f"_op_{kind}")(op)
+        try:
+            getattr(self, f"_op_{kind}")(op)
+        except KeyError as exc:
+            # a missing argument, or an element given a prop it does not take
+            raise CanvasError(f"{kind}: missing {exc}") from exc
+        except TypeError as exc:
+            raise CanvasError(f"{kind}: {exc}") from exc
 
     def _register(self, item: Item) -> None:
         """Add an element to the stage with its parts already known.

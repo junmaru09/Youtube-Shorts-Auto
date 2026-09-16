@@ -37,13 +37,15 @@ AUDIO_SUFFIXES = (".mp3", ".m4a", ".wav", ".ogg", ".flac", ".opus")
 # fixed, so this mapping is too: the same beat gets the same feel every episode,
 # which is what makes a channel recognisable.
 CHAPTER_MOOD: dict[str, str] = {
-    "hook": "tension",      # a question you do not yet have the answer to
-    "intro": "wonder",
-    "basis": "calm",        # groundwork; the music should stay out of the way
-    "main": "wonder",       # the observation itself
-    "detail": "calm",       # numbers, and a lot of them
-    "meaning": "reflective",  # what this overturned
-    "outro": "resolve",
+    "opener": "calm",         # small talk in the room; the music stays out of the way
+    "context": "wonder",      # the first figures
+    "name": "tension",        # the topic named, the big question asked
+    "history": "reflective",  # who noticed what, and when
+    "mechanism1": "wonder",
+    "mechanism2": "wonder",
+    "replay": "calm",         # the figure rebuilt as the recap
+    "open": "reflective",     # what is still unknown, what this overturned
+    "close": "resolve",
 }
 DEFAULT_MOOD = "calm"
 

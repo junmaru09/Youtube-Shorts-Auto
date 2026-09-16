@@ -15,13 +15,15 @@ from tests.conftest import needs_ffmpeg
 
 CHAPTER_KEYS = [c.key for c in brand_mod.EPISODE_PLAN]
 SPANS = [
-    {"start_s": 0, "end_s": 8},       # hook — below the minimum bed length
-    {"start_s": 8, "end_s": 60},
-    {"start_s": 60, "end_s": 240},
-    {"start_s": 240, "end_s": 500},
-    {"start_s": 500, "end_s": 800},
-    {"start_s": 800, "end_s": 1030},
-    {"start_s": 1030, "end_s": 1140},
+    {"start_s": 0, "end_s": 86},          # opener
+    {"start_s": 86, "end_s": 216},        # context
+    {"start_s": 216, "end_s": 224},       # name — a few lines, below the minimum bed length
+    {"start_s": 224, "end_s": 386},       # history
+    {"start_s": 386, "end_s": 602},       # mechanism1
+    {"start_s": 602, "end_s": 818},       # mechanism2
+    {"start_s": 818, "end_s": 894},       # replay
+    {"start_s": 894, "end_s": 1024},      # open
+    {"start_s": 1024, "end_s": 1056},     # close
 ]
 
 
@@ -83,11 +85,12 @@ def test_the_mood_follows_the_chapter(library):
 
 
 def test_a_chapter_too_short_to_establish_anything_gets_silence(library):
-    """The hook is a few seconds. A two-second sting there is worse than
-    nothing."""
+    """Naming the topic takes a few lines. An eight-second sting there is
+    worse than nothing."""
     beds = bgm.plan_beds(SPANS, CHAPTER_KEYS, library, seed="1")
-    assert beds[0].track is None
-    assert beds[0].seconds < bgm.MIN_BED_SECONDS
+    short = CHAPTER_KEYS.index("name")
+    assert beds[short].track is None
+    assert beds[short].seconds < bgm.MIN_BED_SECONDS
 
 
 # --- degrading gracefully -----------------------------------------------------

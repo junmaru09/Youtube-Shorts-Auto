@@ -59,13 +59,22 @@ def build_description(idea, sources, chapters_text: str, channel: dict, brand) -
     if chapters_text:
         parts += ["■ 目次", chapters_text, ""]
 
-    if sources:
+    primary = [s for s in sources if s["kind"] != "background"]
+    background = [s for s in sources if s["kind"] == "background"]
+    if primary:
         parts.append("■ 参考にした一次ソース")
-        for source in sources:
+        for source in primary:
             when = (source["published_at"] or "")[:10]
             label = f"[{source['ref']}] {source['title']}"
             parts.append(f"{label}{f' ({when})' if when else ''}")
             parts.append(source["url"])
+        parts.append("")
+    if background:
+        # Discovery history is textbook knowledge, not a primary source, and
+        # is listed as such so the promise about the section above holds.
+        parts.append("■ 発見史（一般的な参考知識）")
+        for source in background:
+            parts.append(f"[{source['ref']}] {source['title']} — {source['summary']}")
         parts.append("")
 
     tags = json.loads(idea["tags_json"] or "[]")
