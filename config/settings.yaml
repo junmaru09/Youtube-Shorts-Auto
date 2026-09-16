@@ -86,9 +86,19 @@ llm:
   recent_context_size: 40
 
 tts:
-  provider: google
-  # 話者ごとの音声名は brand.py（または config/brand.yaml）の navigators で指定する。
-  # Chirp 3 HD は月100万文字まで無料。月30本×9,000文字=27万文字で枠内。
+  # voicevox: ずんだもん／四国めたん。ローカルの VOICEVOX ENGINE を使うので費用ゼロ。
+  # google:   Chirp 3 HD。月100万文字まで無料（フォールバック）。
+  provider: voicevox
+  voicevox:
+    # ENGINE の URL。Windows 版 VOICEVOX アプリを起動していればそこに立つ。
+    # WSL2 から Windows 側のアプリに繋ぐなら http://<Windowsのアドレス>:50021。
+    url: http://127.0.0.1:50021
+    # Linux 版 ENGINE（CPU 版でよい。GPU は要らない）を展開したフォルダ。
+    # 指定すると、URL が応答しないときにパイプラインが自分で起動して終了時に止める。
+    #   https://github.com/VOICEVOX/voicevox_engine/releases → voicevox_engine-linux-cpu-x64-*.7z
+    #   7z x voicevox_engine-linux-cpu-x64-*.7z -o$HOME/voicevox_engine
+    engine_dir: ~/voicevox_engine/linux-cpu-x64
+  # 話者ごとの音声（Google の音声名と VOICEVOX の話者ID）は brand.py の navigators で指定する。
   language_code: ja-JP
   sample_rate: 24000
   free_tier_chars_per_month: 1000000

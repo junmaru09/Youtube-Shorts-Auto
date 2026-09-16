@@ -112,7 +112,7 @@ def synthesize_script(
 
             piece = workdir / f"line_{chapter_index:02d}_{line_index:03d}.wav"
             utterance = backend.synthesize(
-                line["spoken"], navigator.voice, piece, navigator.speaking_rate
+                line["spoken"], tts.voice_for(navigator, backend), piece, navigator.speaking_rate
             )
             spoken_seconds = _duration(utterance.path)
 
@@ -124,6 +124,10 @@ def synthesize_script(
                 "display": line["display"],
                 "start_s": round(cursor, 3),
                 "end_s": round(cursor + spoken_seconds, 3),
+                # what assemble needs to render this line's frame
+                "ops": line.get("ops", []),
+                "expression": line.get("expression", "normal"),
+                "audio": str(utterance.path),
             })
 
             parts.append(utterance.path)
@@ -166,10 +170,13 @@ def run(limit: int = 1, idea_id: int | None = None, provider: str | None = None)
     sample_rate = int(tts_cfg.get("sample_rate", 24000))
     allowance = int(tts_cfg.get("free_tier_chars_per_month", 1_000_000))
     brand = brand_mod.load_brand()
+    voicevox_cfg = tts_cfg.get("voicevox", {}) or {}
     backend = tts.get_backend(
-        provider or tts_cfg.get("provider", "google"),
+        provider or tts_cfg.get("provider", "voicevox"),
         language_code=tts_cfg.get("language_code", "ja-JP"),
         sample_rate=sample_rate,
+        base_url=voicevox_cfg.get("url", "http://127.0.0.1:50021"),
+        engine_dir=voicevox_cfg.get("engine_dir"),
     )
 
     result = NarrateResult()

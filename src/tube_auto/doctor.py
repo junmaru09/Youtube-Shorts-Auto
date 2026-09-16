@@ -250,6 +250,46 @@ def _check_tts_budget() -> list[Check]:
     ]
 
 
+def _check_voicevox() -> list[Check]:
+    """Is the VOICEVOX ENGINE reachable, and does it have the two speakers?"""
+    from . import brand as brand_mod
+    from .tts import VoicevoxTTS
+
+    cfg = config.load_settings().get("tts", {})
+    if cfg.get("provider", "voicevox") != "voicevox":
+        return []
+    vv = cfg.get("voicevox", {}) or {}
+    backend = VoicevoxTTS(base_url=vv.get("url", "http://127.0.0.1:50021"), engine_dir=vv.get("engine_dir"))
+    version = backend.version()
+    if version is None:
+        engine_dir = backend.engine_dir
+        startable = engine_dir is not None and (engine_dir / "run").exists()
+        return [
+            Check(
+                name="VOICEVOX",
+                ok=startable,
+                detail=(f"not running at {backend.base_url}; will be started from {engine_dir}" if startable
+                        else f"not running at {backend.base_url} and no engine to start"),
+                fix="start the VOICEVOX app, or unpack the Linux CPU engine and set tts.voicevox.engine_dir",
+                blocking=not startable,
+            )
+        ]
+    try:
+        speakers = backend.speakers()
+    except Exception as exc:  # noqa: BLE001
+        return [Check(name="VOICEVOX", ok=False, detail=f"running ({version}) but /speakers failed: {exc}")]
+    brand = brand_mod.load_brand()
+    missing = [
+        f"{nav.name} (id {nav.voicevox_speaker})" for nav in brand.navigators.values()
+        if nav.voicevox_speaker not in speakers
+    ]
+    if missing:
+        return [Check(name="VOICEVOX", ok=False, detail=f"running ({version}) but speakers missing: {', '.join(missing)}",
+                      fix="check voicevox_speaker ids in brand.py against GET /speakers")]
+    names = ", ".join(speakers[nav.voicevox_speaker] for nav in brand.navigators.values())
+    return [Check(name="VOICEVOX", ok=True, detail=f"engine {version}: {names}")]
+
+
 def _check_encoder() -> list[Check]:
     """Which encoder assembly will actually use.
 
@@ -465,6 +505,7 @@ def run_checks() -> list[Check]:
         _check_tokens,
         _check_budget,
         _check_tts_budget,
+        _check_voicevox,
         _check_images,
         _check_encoder,
         _check_bgm,
