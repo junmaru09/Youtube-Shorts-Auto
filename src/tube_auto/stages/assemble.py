@@ -1,30 +1,27 @@
-"""Stage 6: cut the visuals to the narration and produce the video.
+"""Stage 6: draw the whiteboard against the narration and produce the video.
 
-The audio is the spine. Every visual was planned against the narration timeline,
-so assembly is mostly a matter of laying each asset into the span it was given
-and letting the soundtrack decide the length.
+The audio is the spine. The narration timeline says when every line starts
+and ends and what it does to the stage, so the picture is the stage replayed
+line by line (stages/whiteboard.py) with the two characters and the subtitle
+band drawn in, then the music bed mixed under the voices.
 
-Four things are burned in rather than left to YouTube:
+What is burned in:
 
-- **Subtitles**, because a large share of this audience watches without sound.
-- **Chapter cards**, because a twenty-minute video needs visible structure and a
-  description timestamp alone does not provide it on screen.
-- **The title**, five seconds in rather than at the top. The opening five
-  seconds are the measured pattern-interrupt window; spending them on a logo
-  spends the only part of the video everyone watches.
+- **Subtitles**, in the band at the bottom, coloured by speaker, because a
+  large share of this audience watches without sound. An SRT is written too,
+  for YouTube's own caption track.
 - **A closing card**, because the end-screen API does not exist and the next
   video has to be offered somehow.
 
-Stills get a slow push-in. A static frame held for ten seconds reads as dead
-air; the same frame moving slightly does not.
+There are no chapter cards and no title telop any more: the reference format
+has neither. Section changes are a background swap and a question; the title
+is the thumbnail's job.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import math
-import random
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -34,6 +31,7 @@ from typing import Any
 from .. import bgm
 from .. import brand as brand_mod
 from .. import config, db, ffmpeg, paths
+from . import whiteboard
 
 log = logging.getLogger(__name__)
 
@@ -116,159 +114,7 @@ def build_subtitles(timeline: list[dict[str, Any]], output: Path, wrap: int = 26
     return output
 
 
-# NASA release packages open with a slate: a full-frame insignia over a
-# "MISSION FEATURE" card, typically five to ten seconds. Nothing in the metadata
-# says so, so the only reliable defence is to start well past it.
-SLATE_SECONDS = 12.0
-
-
-def _footage_offset(path: Path, needed: float) -> float:
-    """Where to start a clip so a title slate does not end up on screen.
-
-    Skips the head where the clip is long enough to afford it, and falls back to
-    a small offset on short clips — which are usually pure renders anyway, since
-    packages with slates run to minutes.
-    """
-    try:
-        duration = ffmpeg.video_info(path)["duration"]
-    except (ffmpeg.FFmpegError, OSError):
-        return 1.0
-    if duration <= needed + 2:
-        return 0.0
-    return min(SLATE_SECONDS, max(1.0, (duration - needed) * 0.25))
-
-
-def _segment(
-    asset: dict[str, Any],
-    seconds: float,
-    output: Path,
-    size: tuple[int, int],
-    fps: int,
-    seed: int,
-) -> Path:
-    """Render one cut to a uniform format so concatenation is trivial."""
-    width, height = size
-    path = Path(asset["path"])
-    kind = asset["kind"]
-
-    fit = (
-        f"scale={width}:{height}:force_original_aspect_ratio=increase,"
-        f"crop={width}:{height},fps={fps},setsar=1"
-    )
-
-    if kind in ("footage", "diagram"):
-        offset = _footage_offset(path, seconds) if kind == "footage" else 0.0
-        cmd = [
-            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-            "-ss", f"{offset:.3f}", "-t", f"{seconds:.3f}", "-i", str(path),
-            "-vf", fit, "-an",
-        ]
-    else:
-        # A still, pushed in slowly.
-        #
-        # zoompan's `d` is output frames *per input frame*. Combined with
-        # `-loop 1`, which feeds the image once per frame, anything above d=1
-        # multiplies: d=250 against a 208-frame input asked for 52,000 frames
-        # and produced a 204MB file for an eight-second cut. Keep d=1 and drive
-        # the zoom from `on`, the output frame counter.
-        frames = max(2, int(seconds * fps))
-        zoom_end = 1.12
-        pan_x = "iw/2-(iw/zoom/2)" if seed % 2 else "0"
-        pan_y = "ih/2-(ih/zoom/2)" if seed % 3 else "0"
-        cmd = [
-            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-            "-loop", "1", "-t", f"{seconds:.3f}", "-r", str(fps), "-i", str(path),
-            "-vf",
-            (
-                f"scale={width}:{height}:force_original_aspect_ratio=increase,"
-                f"crop={width}:{height},"
-                f"zoompan=z='1+{zoom_end - 1:.4f}*on/{frames}':d=1:"
-                f"x='{pan_x}':y='{pan_y}':s={width}x{height}:fps={fps},"
-                f"setsar=1"
-            ),
-            "-frames:v", str(frames), "-an",
-        ]
-
-    cmd += [
-        *ffmpeg.video_args(22, SEGMENT_PRESET),
-        "-pix_fmt", "yuv420p", str(output),
-    ]
-    ffmpeg._run(cmd, timeout=900)
-    return output
-
-
-def _chapter_card(
-    title: str, output: Path, size: tuple[int, int], fps: int,
-    brand: brand_mod.Brand, seconds: float = 1.6,
-) -> Path:
-    """A card announcing the next chapter. Structure the viewer can see."""
-    width, height = size
-    font = ffmpeg.find_font(brand.font_path)
-    text_file = output.parent / f"{output.stem}.txt"
-    text_file.write_text(title, encoding="utf-8")
-    try:
-        ffmpeg._run([
-            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-            "-f", "lavfi", "-i",
-            f"color={brand.palette['bg']}:s={width}x{height}:r={fps}:d={seconds}",
-            "-vf",
-            (
-                f"drawtext=fontfile='{_escape(font)}':textfile='{_escape(text_file)}'"
-                f":expansion=none:fontsize={brand.telop['chapter_size']}"
-                f":fontcolor={brand.palette['ink']}:x=(w-text_w)/2:y=(h-text_h)/2"
-                f",drawbox=x=(iw-420)/2:y=ih/2+90:w=420:h=3:"
-                f"color={brand.palette['accent']}:t=fill"
-            ),
-            *ffmpeg.video_args(22, SEGMENT_PRESET),
-            "-pix_fmt", "yuv420p", str(output),
-        ])
-    finally:
-        text_file.unlink(missing_ok=True)
-    return output
-
-
 CLOSING_SECONDS = 11.0
-# The title appears after the hook, not before it. A pre-roll card spends the
-# five seconds that decide whether anyone stays — the measured pattern-interrupt
-# window — on branding nobody has a reason to care about yet.
-TELOP_START = 5.0
-TELOP_SECONDS = 4.5
-
-
-def _title_telop(brand: brand_mod.Brand, title: str) -> str:
-    """A filter fragment putting the episode title on screen during the hook."""
-    if not title.strip():
-        return ""
-    try:
-        font = ffmpeg.find_font(brand.font_path)
-    except ffmpeg.FontMissing:
-        return ""
-
-    text = wrap_japanese(title.strip(), 18).replace("\n", " ")
-    size = brand.telop["keyword_size"]
-    end = TELOP_START + TELOP_SECONDS
-    box = f"boxcolor=black@0.55:box=1:boxborderw={size // 3}"
-    return (
-        f",drawtext=fontfile='{_escape(font)}':text='{_drawtext_escape(text)}'"
-        f":expansion=none:fontsize={size}:fontcolor={brand.palette['ink']}"
-        f":borderw=4:bordercolor=black@0.8:{box}"
-        f":x=(w-text_w)/2:y=h*0.16"
-        # Fade the box and text together at both ends rather than cutting.
-        f":alpha='if(lt(t,{TELOP_START}),0,"
-        f"if(lt(t,{TELOP_START + 0.4}),(t-{TELOP_START})/0.4,"
-        f"if(lt(t,{end - 0.6}),1,if(lt(t,{end}),({end}-t)/0.6,0))))'"
-    )
-
-
-def _drawtext_escape(text: str) -> str:
-    """Escape for an inline drawtext `text=` value.
-
-    Chapter cards use `textfile=` and avoid this entirely; the telop cannot,
-    because it needs to sit in the same filter graph as the subtitles.
-    """
-    for char, replacement in (("\\", r"\\"), (":", r"\:"), ("'", r"\'"), ("%", r"\%")):
-        text = text.replace(char, replacement)
-    return text
 
 
 def _closing_card(
@@ -346,60 +192,39 @@ def build_video(
     idea_id: int,
     assets: list[dict[str, Any]],
     narration: Path,
-    subtitles: Path,
+    timeline: list[dict[str, Any]],
     output: Path,
     brand: brand_mod.Brand,
-    chapters: list[dict[str, Any]],
     spans: list[dict[str, Any]],
     settings: dict[str, Any],
-    title_text: str = "",
 ) -> Path:
-    """Lay the visuals against the audio and mix it all down."""
+    """Replay the stage against the audio and mix it all down."""
     video_cfg = settings.get("video", {})
     post_cfg = settings.get("postprocess", {})
     chapter_keys = [c.key for c in brand_mod.EPISODE_PLAN]
     size = (int(video_cfg.get("width", 1920)), int(video_cfg.get("height", 1080)))
     fps = int(video_cfg.get("fps", 30))
+    if size != (1920, 1080):
+        log.warning("the whiteboard is drawn at 1920x1080; video.width/height %s are ignored", size)
 
     workdir = output.parent / f"{output.stem}_segments"
     workdir.mkdir(parents=True, exist_ok=True)
-    segments: list[Path] = []
 
-    ordered = sorted(
-        (a for a in assets if a["path"]),
-        key=lambda a: (json.loads(a["meta_json"] or "{}").get("start_s", 0.0), a["order_idx"]),
-    )
-    by_chapter: dict[int, list[dict[str, Any]]] = {}
-    for asset in ordered:
-        by_chapter.setdefault(asset["chapter"] or 0, []).append(asset)
+    frames = whiteboard.render_frames(timeline, assets, brand, workdir / "frames")
+    for problem in frames.problems[:5]:
+        log.warning("idea %d: %s", idea_id, problem)
+    if frames.entries == 0:
+        raise ffmpeg.FFmpegError("no frames; the timeline is empty")
+    log.info("idea %d: %d frames, %d listing rows, %.1f min of picture",
+             idea_id, frames.frames, frames.entries, frames.seconds / 60)
 
-    for index, span in enumerate(spans):
-        title = chapters[index].get("title", "") if index < len(chapters) else span["title"]
-        if index > 0 and title:
-            segments.append(
-                _chapter_card(title, workdir / f"card_{index:02d}.mp4", size, fps, brand)
-            )
-        for order, asset in enumerate(by_chapter.get(index, [])):
-            seconds = float(asset["duration_s"]) or 6.0
-            segment = workdir / f"seg_{index:02d}_{order:03d}.mp4"
-            try:
-                _segment(asset, seconds, segment, size, fps, seed=order)
-            except ffmpeg.FFmpegError as exc:
-                log.warning("cut failed (%s), skipping: %s", asset["path"], exc)
-                continue
-            segments.append(segment)
-
-    if not segments:
-        raise ffmpeg.FFmpegError("no usable segments; nothing to assemble")
-
+    picture = whiteboard.frames_to_video(frames.path, workdir / "stage.mp4", fps, frames.seconds)
+    segments = [picture]
     closing = _closing_card(workdir / "closing.mp4", size, fps, brand)
     if closing is not None:
         segments.append(closing)
-
     silent = _concat(segments, workdir / "picture.mp4")
 
-    # The picture is cut to the audio, but rounding across a hundred segments
-    # drifts. `-shortest` lets the narration decide the final length.
     loudness = float(post_cfg.get("loudness_target", -14.0))
     gain = float(post_cfg.get("bgm_gain_db", -22.0))
     bed, _plan = bgm.build_bed(
@@ -417,19 +242,9 @@ def build_video(
         audio_filter = bgm.narration_only_filter(loudness, pad)
 
     cmd += [
-        "-filter_complex",
-        # BorderStyle=4 paints an opaque box behind the text. NASA imagery runs
-        # from black starfields to white press figures, and an outline alone
-        # leaves the subtitle unreadable on the bright ones.
-        f"[0:v]subtitles='{_escape(subtitles)}':force_style="
-        f"'FontSize=22,PrimaryColour=&H00FFFFFF,BorderStyle=4,"
-        f"BackColour=&HA0000000,Outline=0,Shadow=0,MarginV=48'"
-        + _title_telop(brand, title_text)
-        + "[v];"
-        + audio_filter,
-        "-map", "[v]", "-map", "[a]",
-        *ffmpeg.video_args(21, FINAL_PRESET),
-        "-pix_fmt", "yuv420p",
+        "-filter_complex", audio_filter,
+        "-map", "0:v", "-map", "[a]",
+        "-c:v", "copy",
         # loudnorm resamples internally and will happily emit 96 kHz if left to
         # itself, which YouTube then re-encodes. Pin the output rate.
         "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
@@ -501,9 +316,9 @@ def run(limit: int = 1, idea_id: int | None = None) -> AssembleResult:
             script_row = db.get_script(conn, current_id)
             assets = [dict(a) for a in db.get_assets(conn, current_id)]
 
-            if narration_row is None or script_row is None or not assets:
+            if narration_row is None or script_row is None:
                 result.failed += 1
-                result.errors.append(f"idea {current_id}: narration, script or assets missing")
+                result.errors.append(f"idea {current_id}: narration or script missing")
                 continue
 
             blocked = db.unlicensed_assets(conn, current_id)
@@ -516,7 +331,6 @@ def run(limit: int = 1, idea_id: int | None = None) -> AssembleResult:
                 continue
 
             timeline = json.loads(narration_row["timeline_json"])
-            chapters = json.loads(script_row["chapters_json"])
             spans = chapter_spans(timeline)
 
             output = paths.RENDERS_DIR / f"idea_{current_id:05d}.mp4"
@@ -525,9 +339,8 @@ def run(limit: int = 1, idea_id: int | None = None) -> AssembleResult:
 
             try:
                 build_video(
-                    current_id, assets, Path(narration_row["path"]), subtitles,
-                    output, brand, chapters, spans, settings,
-                    title_text=idea["hook"] or "",
+                    current_id, assets, Path(narration_row["path"]), timeline,
+                    output, brand, spans, settings,
                 )
             except (ffmpeg.FFmpegError, ffmpeg.FFmpegMissing, ffmpeg.FontMissing, OSError) as exc:
                 log.error("assembly failed for idea %d: %s", current_id, exc)

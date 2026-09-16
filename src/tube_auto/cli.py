@@ -6,10 +6,9 @@ The daily loop:
     tube-auto status        what state is everything in, and what is next?
     tube-auto research      choose a topic and gather its primary sources
     tube-auto script        write it, with every number cited
-    tube-auto narrate       synthesise the audio and learn the real timings
-    tube-auto footage       pull NASA material for the timeline
-    tube-auto diagrams      draw the figures NASA does not have
-    tube-auto assemble      cut it together
+    tube-auto narrate       synthesise the audio (VOICEVOX) and learn the real timings
+    tube-auto footage       pull NASA photos to sit behind the stage
+    tube-auto assemble      draw the whiteboard against the audio and mix it down
     streamlit run review_app.py   watch it and approve
     tube-auto publish       upload as private
     tube-auto go-live       make it visible (nothing is measured until this)
@@ -140,7 +139,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         ("researched", "tube-auto script", "台本待ち"),
         ("scripted", "tube-auto narrate", "音声待ち"),
         ("narrated", "tube-auto footage", "素材待ち"),
-        ("sourced", "tube-auto diagrams && tube-auto assemble", "図解・合成待ち"),
+        ("sourced", "tube-auto assemble", "合成待ち"),
         ("approved", "tube-auto publish", "投稿待ち"),
     ]
     printed = False
@@ -313,7 +312,6 @@ def cmd_build(args: argparse.Namespace) -> int:
         ("script", lambda: cmd_script(argparse.Namespace(limit=1, idea=None, dry_run=False, reset_attempts=False))),
         ("narrate", lambda: cmd_narrate(argparse.Namespace(limit=1, idea=None, provider=args.provider))),
         ("footage", lambda: cmd_footage(argparse.Namespace(limit=1, idea=None))),
-        ("diagrams", lambda: cmd_diagrams(argparse.Namespace(limit=1, idea=None))),
         ("assemble", lambda: cmd_assemble(argparse.Namespace(limit=1, idea=None))),
     ]
     for name, step in steps:
@@ -451,7 +449,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--idea", type=_positive, default=None)
     p.set_defaults(func=cmd_footage)
 
-    p = sub.add_parser("diagrams", help="draw the figures NASA does not have")
+    p = sub.add_parser("diagrams", help="(legacy) matplotlib figures; the whiteboard replaced them")
     p.add_argument("--limit", type=_positive, default=1)
     p.add_argument("--idea", type=_positive, default=None)
     p.set_defaults(func=cmd_diagrams)

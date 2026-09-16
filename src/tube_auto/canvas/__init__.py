@@ -137,6 +137,10 @@ class Canvas:
         self.state = State()
         self.assets = assets
         self.seed = seed
+        # A photo the current chapter brought (footage's still). Used when the
+        # script asks for `background name=space`; parchment and room stay
+        # drawn, because a photo under a parchment figure looks like a slide.
+        self.chapter_photo: Path | None = None
         self._counter = 0
         self._bg_cache: dict[str, Image.Image] = {}
 
@@ -294,12 +298,44 @@ class Canvas:
         else:  # "on"
             cx, cy = (tx0 + tx1) / 2, (ty0 + ty1) / 2
         box = (cx - tw / 2, cy - th / 2, cx + tw / 2, cy + th / 2)
+        if at not in SLOTS:
+            box = self._nudge_label(box, side)
         props: dict[str, Any] = {"text": text, "size": size, "colour": colour, "at": at}
         if pointer:
             # a short arrow from the label's edge to the target's edge
             p0, p1 = _edge_points(box, target, pad=8)
             props["pointer"] = (p0, p1)
         self.state.items.append(Item(self._name(op, "label"), "label", box, props))
+
+    def _nudge_label(self, box: Box, side: str) -> Box:
+        """Move a label off any label already there.
+
+        Two bands labelled "氷期" and "間氷期" land on the same spot when both
+        are put above the timeline; the reference sets them side by side.
+        Slide sideways first (the pointer still reaches), then stack.
+        """
+        def overlaps(a: Box, b: Box) -> bool:
+            return not (a[2] < b[0] - 8 or a[0] > b[2] + 8 or a[3] < b[1] - 4 or a[1] > b[3] + 4)
+
+        others = [i.box for i in self.state.items if i.kind == "label"]
+        for _ in range(6):
+            hit = next((o for o in others if overlaps(box, o)), None)
+            if hit is None:
+                return box
+            w = box[2] - box[0]
+            if side in ("above", "below"):
+                # step away from the other label's centre, horizontally
+                direction = 1 if (box[0] + box[2]) >= (hit[0] + hit[2]) else -1
+                shift = (w + 24) * direction
+                if direction > 0:
+                    shift = hit[2] + 24 - box[0]
+                else:
+                    shift = hit[0] - 24 - box[2]
+                box = (box[0] + shift, box[1], box[2] + shift, box[3])
+            else:
+                h = box[3] - box[1]
+                box = (box[0], box[1] - h - 12, box[2], box[3] - h - 12)
+        return box
 
     def _target(self, ref: str) -> Box:
         """An arrow endpoint. Slots count as their centre point, not their
@@ -402,10 +438,11 @@ class Canvas:
 
     def background(self) -> Image.Image:
         st = self.state
-        key = f"{st.background}:{st.background_photo}"
+        photo = st.background_photo or (self.chapter_photo if st.background == "space" else None)
+        key = f"{st.background}:{photo}"
         if key not in self._bg_cache:
-            if st.background_photo and st.background_photo.exists():
-                img = D.dimmed_photo(Image.open(st.background_photo))
+            if photo and photo.exists():
+                img = D.dimmed_photo(Image.open(photo))
             elif st.background == "space" and not (self.assets and self.assets.background("space")):
                 img = D.starfield(seed=self.seed)
             elif st.background == "parchment" or not self.assets or not self.assets.background(st.background):
@@ -511,15 +548,19 @@ class Canvas:
             resized = sprite.resize((round(box[2] - box[0]), round(box[3] - box[1])), Image.LANCZOS)
             img.paste(resized, (round(box[0]), round(box[1])), resized if resized.mode == "RGBA" else None)
 
-    def render(self, subtitle: str = "", speaker: str = "explainer",
+    def finish(self, img: Image.Image, subtitle: str, speaker: str,
                sprites: "SpriteSet | None" = None, talking: bool = True, mouth_open: bool = False) -> Image.Image:
-        img = self.render_stage()
+        """Sprites and the subtitle band on top of a rendered stage."""
         if sprites is not None:
             sprites.paste(img, self.state.expression, speaker if talking else None, mouth_open)
         else:
             _placeholder_sprites(img, speaker)
         _subtitle_band(img, subtitle, speaker)
         return img
+
+    def render(self, subtitle: str = "", speaker: str = "explainer",
+               sprites: "SpriteSet | None" = None, talking: bool = True, mouth_open: bool = False) -> Image.Image:
+        return self.finish(self.render_stage(), subtitle, speaker, sprites, talking, mouth_open)
 
     def snapshot(self) -> State:
         return copy.deepcopy(self.state)
@@ -547,13 +588,15 @@ def _edge_points(a: Box, b: Box, pad: float = 14.0) -> tuple[tuple[float, float]
     return exit_point(a, ax, ay, dx, dy), exit_point(b, bx, by, -dx, -dy)
 
 
-def _placeholder_sprites(img: Image.Image, speaker: str) -> None:
+def _placeholder_sprites(img: Image.Image, speaker: str, only: str | None = None) -> None:
     """Coloured circles until real sprite assets exist."""
     d = ImageDraw.Draw(img)
     for who, xy, colour, label in (
         ("explainer", S.SPRITE_LEFT, (120, 200, 120), "ずんだ"),
         ("listener", S.SPRITE_RIGHT, (200, 140, 220), "めたん"),
     ):
+        if only and who != only:
+            continue
         x, y = xy
         shade = colour if who == speaker else tuple(int(c * 0.72) for c in colour)
         d.ellipse((x + 20, y + 20, x + S.SPRITE_SIZE - 20, y + S.SPRITE_SIZE - 20), fill=shade, outline=S.INK, width=S.OUTLINE_SHAPE)
@@ -631,14 +674,17 @@ class SpriteSet:
                 return im
         return None
 
+    def has(self, role: str) -> bool:
+        folder = self.characters.get(role)
+        return bool(folder) and self._load(folder, "normal", False) is not None
+
     def paste(self, img: Image.Image, expressions: dict[str, str], speaker: str | None, mouth_open: bool) -> None:
         for role, xy in (("explainer", S.SPRITE_LEFT), ("listener", S.SPRITE_RIGHT)):
             folder = self.characters.get(role)
-            if not folder:
-                continue
             talking = role == speaker
-            sprite = self._load(folder, expressions.get(role, "normal"), mouth_open and talking)
+            sprite = self._load(folder, expressions.get(role, "normal"), mouth_open and talking) if folder else None
             if sprite is None:
+                _placeholder_sprites(img, speaker or "", only=role)
                 continue
             scale = S.SPRITE_SIZE / max(sprite.width, sprite.height)
             sprite = sprite.resize((round(sprite.width * scale), round(sprite.height * scale)), Image.LANCZOS)

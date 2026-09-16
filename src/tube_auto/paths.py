@@ -12,6 +12,12 @@ SETTINGS_FILE = CONFIG_DIR / "settings.yaml"
 CHANNELS_FILE = CONFIG_DIR / "channels.yaml"
 THEMES_DIR = CONFIG_DIR / "themes"
 
+# Hand-collected art: character sprites, いらすとや-style illustrations,
+# background photos. Committed alongside a library.yaml that records the
+# licence of every file.
+ASSETS_DIR = ROOT / "assets"
+SPRITES_DIR = ASSETS_DIR / "sprites"
+
 WORK_DIR = ROOT / "work"
 FOOTAGE_DIR = WORK_DIR / "footage"
 STILLS_DIR = WORK_DIR / "stills"
