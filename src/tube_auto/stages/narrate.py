@@ -21,6 +21,7 @@ from typing import Any
 
 from .. import brand as brand_mod
 from .. import config, db, ffmpeg, paths, tts
+from ..budget import month_start
 
 log = logging.getLogger(__name__)
 
@@ -163,6 +164,7 @@ def run(limit: int = 1, idea_id: int | None = None, provider: str | None = None)
     settings = config.load_settings()
     tts_cfg = settings.get("tts", {})
     sample_rate = int(tts_cfg.get("sample_rate", 24000))
+    allowance = int(tts_cfg.get("free_tier_chars_per_month", 1_000_000))
     brand = brand_mod.load_brand()
     backend = tts.get_backend(
         provider or tts_cfg.get("provider", "google"),
@@ -192,6 +194,24 @@ def run(limit: int = 1, idea_id: int | None = None, provider: str | None = None)
 
             chapters = json.loads(script_row["chapters_json"])
             workdir = paths.AUDIO_DIR / f"idea_{current_id:05d}"
+
+            # Refuse to cross the free tier. Google does not fail past the
+            # allowance — it starts charging — and a budget alert on their side
+            # only sends an email. This is the one place the crossing can
+            # actually be prevented, so it is a hard stop, not a warning.
+            if backend.metered:
+                needed = int(script_row["char_count"])
+                used = db.tts_chars_since(conn, month_start())
+                if used + needed > allowance:
+                    result.failed += 1
+                    result.errors.append(
+                        f"idea {current_id}: 今月のTTS無料枠を超えます"
+                        f"（使用 {used:,} + 必要 {needed:,} > 枠 {allowance:,} 文字）。"
+                        "来月まで待つか、tts.free_tier_chars_per_month を確認してください。"
+                        "課金を避けるため合成しません"
+                    )
+                    log.error("TTS free tier would be exceeded for idea %d; refusing", current_id)
+                    continue
 
             try:
                 audio, timeline, chars = synthesize_script(

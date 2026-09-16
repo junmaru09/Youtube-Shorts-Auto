@@ -40,6 +40,10 @@ class Utterance:
 @runtime_checkable
 class TTSBackend(Protocol):
     name: str
+    # Whether usage counts against a metered allowance. The narrate stage
+    # refuses to cross the free tier for metered backends and ignores the
+    # question for local ones.
+    metered: bool
 
     def synthesize(self, text: str, voice: str, output: Path, speaking_rate: float) -> Utterance:
         """Write one line of speech to `output`."""
@@ -56,6 +60,7 @@ class GoogleTTS:
     """
 
     name = "google"
+    metered = True
 
     def __init__(self, language_code: str = "ja-JP", sample_rate: int = 24000) -> None:
         self.language_code = language_code
@@ -113,6 +118,7 @@ class SilentTTS:
     """
 
     name = "silent"
+    metered = False
     CHARS_PER_SECOND = 400 / 60
 
     def __init__(self, sample_rate: int = 24000) -> None:

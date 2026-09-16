@@ -765,3 +765,68 @@ def test_a_broken_config_still_renders(monkeypatch):
 
     monkeypatch.setattr(config, "load_settings", _boom)
     assert ffmpeg.configured_encoder() == "auto"
+
+
+# --- the TTS free tier ---------------------------------------------------------
+
+
+def _scripted_idea(conn, chars: int, key: str = "k1") -> int:
+    idea_id = _idea(conn, key, status="scripted")
+    db.upsert_script(
+        conn, idea_id=idea_id, char_count=chars, model="m", hooks=[],
+        chapters=[{"title": "章", "lines": [{"speaker": "explainer",
+                    "display": "あ" * 10, "spoken": "あ" * 10, "refs": []}]}],
+    )
+    conn.commit()
+    return idea_id
+
+
+def test_narration_refuses_to_cross_the_free_tier(temp_db, temp_work, monkeypatch):
+    """Google does not fail past the allowance — it starts charging — and its
+    budget alert only sends an email. This is the one place the crossing can
+    be prevented, so it stops rather than warns."""
+    from tube_auto import config, tts
+    from tube_auto.stages import narrate
+
+    settings = json.loads(json.dumps(config.load_settings()))
+    settings["tts"] = {**settings["tts"], "free_tier_chars_per_month": 10_000}
+    monkeypatch.setattr(config, "load_settings", lambda: settings)
+
+    # 9,500 already used this month; the next script needs 7,200.
+    prior = _idea(temp_db, key="prior", status="narrated")
+    db.upsert_narration(temp_db, idea_id=prior, path="/tmp/p.wav", duration_s=1000,
+                        chars=9_500, timeline=[], voices={})
+    idea_id = _scripted_idea(temp_db, chars=7_200)
+
+    class _Metered(tts.SilentTTS):
+        name = "google"
+        metered = True
+
+    called = []
+    monkeypatch.setattr(tts, "get_backend", lambda *a, **k: _Metered())
+    monkeypatch.setattr(narrate, "synthesize_script",
+                        lambda *a, **k: called.append(1) or pytest.fail("must not synthesize"))
+
+    result = narrate.run(limit=1)
+    assert result.narrated == 0
+    assert result.failed == 1
+    assert any("無料枠" in note for note in result.errors)
+    assert called == []
+
+    with db.session() as conn:
+        assert db.get_idea(conn, idea_id)["status"] == "scripted"  # untouched, retry next month
+
+
+def test_a_local_backend_is_never_blocked_by_the_tier(temp_db, temp_work, monkeypatch):
+    """The silent backend costs nothing; metering it would block dry runs."""
+    from tube_auto import config, tts
+    from tube_auto.stages import narrate
+
+    settings = json.loads(json.dumps(config.load_settings()))
+    settings["tts"] = {**settings["tts"], "free_tier_chars_per_month": 1}
+    monkeypatch.setattr(config, "load_settings", lambda: settings)
+    _scripted_idea(temp_db, chars=7_200)
+
+    result = narrate.run(limit=1, provider="silent")
+    assert result.failed == 0
+    assert result.narrated == 1
