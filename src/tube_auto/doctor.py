@@ -290,6 +290,22 @@ def _check_voicevox() -> list[Check]:
     return [Check(name="VOICEVOX", ok=True, detail=f"engine {version}: {names}")]
 
 
+def _check_sprites() -> list[Check]:
+    """Do the two characters have art? Placeholders render otherwise."""
+    from . import brand as brand_mod
+    from . import paths
+    from .canvas import SpriteSet
+
+    brand = brand_mod.load_brand()
+    sprites = SpriteSet(paths.SPRITES_DIR, {role: nav.sprite for role, nav in brand.navigators.items()})
+    missing = [f"{nav.name} ({paths.SPRITES_DIR / nav.sprite}/normal_closed.png)"
+               for role, nav in brand.navigators.items() if not sprites.has(role)]
+    if missing:
+        return [Check(name="sprites", ok=False, detail="no art for " + ", ".join(missing),
+                      fix="see assets/README.md; coloured circles stand in until then", blocking=False)]
+    return [Check(name="sprites", ok=True, detail="both characters have art")]
+
+
 def _check_encoder() -> list[Check]:
     """Which encoder assembly will actually use.
 
@@ -506,6 +522,7 @@ def run_checks() -> list[Check]:
         _check_budget,
         _check_tts_budget,
         _check_voicevox,
+        _check_sprites,
         _check_images,
         _check_encoder,
         _check_bgm,
