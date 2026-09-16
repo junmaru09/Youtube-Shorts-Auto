@@ -25,6 +25,7 @@ import json
 import logging
 import math
 import random
+import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -437,9 +438,11 @@ def build_video(
     ]
     ffmpeg._run(cmd, timeout=3600)
 
-    for leftover in workdir.glob("*.mp4"):
-        leftover.unlink(missing_ok=True)
-    workdir.rmdir()
+    # The render is already written by this point; the workdir is scratch.
+    # Removed whole rather than by pattern — the music bed lives in a
+    # subdirectory, and a pattern that only matched *.mp4 left it behind, so
+    # rmdir failed and reported a finished render as a failed one.
+    shutil.rmtree(workdir, ignore_errors=True)
     return output
 
 
