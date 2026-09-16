@@ -37,7 +37,11 @@ LENGTH_TOLERANCE = 0.25
 # One or two sentences of narration. The length target is expressed to the
 # model as lines-per-chapter at this size, because a character total is not a
 # thing it can hit while writing.
-CHARS_PER_LINE = 60
+#
+# Calibrated, not chosen: asked for 120 lines "of about 60 characters" the
+# model delivered 5,058 characters, so its natural line runs about 42. The
+# figure here is what it actually writes, and the line count is derived from it.
+CHARS_PER_LINE = 45
 
 SCRIPT_TOOL = {
     "name": "submit_script",
@@ -267,8 +271,13 @@ def validate(script: Script, known_refs: set[str], target_chars: int) -> list[st
     actual = script.char_count
     if abs(actual - target_chars) > target_chars * LENGTH_TOLERANCE:
         minutes = actual / 400
+        lines = sum(len(c.lines) for c in script.chapters)
+        per_line = actual / lines if lines else 0
+        # The line count and the per-line average say *which* way it missed —
+        # too few lines, or lines too short — and that decides the fix.
         problems.append(
             f"分量が目標から外れている: {actual}文字（目標{target_chars}文字、約{minutes:.1f}分）"
+            f" — {lines}行、1行平均{per_line:.0f}字"
         )
 
     if len(script.hooks) < 3:
@@ -285,7 +294,12 @@ def validate(script: Script, known_refs: set[str], target_chars: int) -> list[st
     return problems
 
 
-def run(limit: int = 1, idea_id: int | None = None, dry_run: bool = False) -> ScriptResult:
+def run(
+    limit: int = 1,
+    idea_id: int | None = None,
+    dry_run: bool = False,
+    reset_attempts: bool = False,
+) -> ScriptResult:
     """Write scripts for ideas that have sources but no script yet."""
     settings = config.load_settings()
     llm_cfg = settings.get("llm", {})
@@ -302,6 +316,12 @@ def run(limit: int = 1, idea_id: int | None = None, dry_run: bool = False) -> Sc
     result = ScriptResult()
     with db.session() as conn:
         if idea_id is not None:
+            if reset_attempts:
+                # The retry cap stops the pipeline paying repeatedly for a
+                # topic that will never validate. It should not also count
+                # attempts that failed for reasons that have since been fixed.
+                db.reset_attempts(conn, idea_id)
+                conn.commit()
             row = db.get_idea(conn, idea_id)
             ideas = [row] if row else []
         else:

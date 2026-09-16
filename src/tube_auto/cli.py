@@ -201,7 +201,10 @@ def cmd_research(args: argparse.Namespace) -> int:
 def cmd_script(args: argparse.Namespace) -> int:
     from .stages import script
 
-    result = script.run(limit=args.limit, idea_id=args.idea, dry_run=args.dry_run)
+    result = script.run(
+        limit=args.limit, idea_id=args.idea, dry_run=args.dry_run,
+        reset_attempts=args.reset_attempts,
+    )
     print(
         f"script: {result.written} written, {result.rejected} rejected "
         f"(LLM ${result.llm_cost_usd:.4f})"
@@ -307,7 +310,7 @@ def cmd_build(args: argparse.Namespace) -> int:
     """Research through assemble, stopping at the first stage that produces nothing."""
     steps = [
         ("research", lambda: cmd_research(argparse.Namespace(count=1, theme=args.theme, dry_run=False))),
-        ("script", lambda: cmd_script(argparse.Namespace(limit=1, idea=None, dry_run=False))),
+        ("script", lambda: cmd_script(argparse.Namespace(limit=1, idea=None, dry_run=False, reset_attempts=False))),
         ("narrate", lambda: cmd_narrate(argparse.Namespace(limit=1, idea=None, provider=args.provider))),
         ("footage", lambda: cmd_footage(argparse.Namespace(limit=1, idea=None))),
         ("diagrams", lambda: cmd_diagrams(argparse.Namespace(limit=1, idea=None))),
@@ -433,6 +436,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=_positive, default=1)
     p.add_argument("--idea", type=_positive, default=None)
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--reset-attempts", action="store_true",
+                   help="clear the idea's retry count first (needs --idea)")
     p.set_defaults(func=cmd_script)
 
     p = sub.add_parser("narrate", help="synthesise the narration")
