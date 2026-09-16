@@ -9,13 +9,14 @@ dependencies = [
     "google-api-python-client>=2.150.0",  # YouTube Data and Analytics
     "google-auth-oauthlib>=1.2.0",
     "matplotlib>=3.9",                # animated diagrams
+    "Pillow>=10.0",                   # the whiteboard canvas
     "PyYAML>=6.0",
     "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]
 review = ["streamlit>=1.40.0"]
-dev = ["pytest>=8.0.0"]
+dev = ["pytest>=8.0.0", "numpy>=1.26"]
 
 [project.scripts]
 tube-auto = "tube_auto.cli:main"
