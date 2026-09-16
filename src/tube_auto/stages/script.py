@@ -34,9 +34,18 @@ log = logging.getLogger(__name__)
 # How far off the character target a script may land before it is rejected.
 LENGTH_TOLERANCE = 0.25
 
+# One or two sentences of narration. The length target is expressed to the
+# model as lines-per-chapter at this size, because a character total is not a
+# thing it can hit while writing.
+CHARS_PER_LINE = 60
+
 SCRIPT_TOOL = {
     "name": "submit_script",
     "description": "Submit the full script for one video.",
+    # Strict, so the schema is enforced rather than advisory. Without it the
+    # model returned zero hooks against `minItems: 3` and the API accepted it —
+    # the rejection was caught by validate(), but only after $0.11 was spent.
+    "strict": True,
     "input_schema": {
         "type": "object",
         "properties": {
@@ -82,14 +91,17 @@ SCRIPT_TOOL = {
                                     },
                                 },
                                 "required": ["speaker", "display", "spoken", "refs"],
+                                "additionalProperties": False,
                             },
                         },
                     },
                     "required": ["key", "title", "visual_intent", "lines"],
+                    "additionalProperties": False,
                 },
             },
         },
         "required": ["hooks", "chapters"],
+        "additionalProperties": False,
     },
 }
 
@@ -130,8 +142,10 @@ def _system_prompt(brand: brand_mod.Brand, theme, target_chars: int) -> str:
 {reading.SPOKEN_TEXT_RULES}
 
 分量:
-- spoken の合計が **{target_chars}文字前後**（±25%以内）になるように書く。
+- 各章に指定された**行数**を満たす。1行は1〜2文、{CHARS_PER_LINE}文字前後。
+- 行数を満たせば spoken の合計は約{target_chars}文字（{target_chars // 400}分）になる。
   日本語のナレーションは1分あたり約400文字です。
+- 短く終わらせない。指定行数に届くまで、出典の中身を具体的に展開する。
 
 このテーマで禁止されていること:
 {chr(10).join('- ' + b for b in theme.banned)}"""
@@ -151,16 +165,19 @@ def _user_prompt(idea, sources, plan: list[dict[str, Any]], target_chars: int) -
         if source["summary"]:
             parts.append(f"      {source['summary'][:600]}")
 
-    parts += ["", "章構成（key はこのまま使うこと。目安の文字数も守る）:"]
+    total_lines = sum(c["lines"] for c in plan)
+    parts += ["", f"章構成（key はこのまま使うこと。各章の行数は必ず満たすこと。合計 {total_lines} 行）:"]
     for chapter in plan:
         parts.append(
             f"  {chapter['key']}: {chapter['title']} — {chapter['covers']}"
-            f"（約{chapter['chars']}文字）"
+            f"（{chapter['lines']}行・約{chapter['chars']}文字）"
         )
 
     parts += [
         "",
-        f"spoken の合計が約{target_chars}文字になるように、submit_script で提出してください。",
+        f"1行は1〜2文、{CHARS_PER_LINE}文字前後。各章の行数を満たすと spoken の合計が約{target_chars}文字になります。",
+        "行数が足りない台本は自動で差し戻され、書き直しの費用がかかります。",
+        "hooks は必ず3案。submit_script で提出してください。",
     ]
     return "\n".join(parts)
 
@@ -183,6 +200,10 @@ def _chapter_plan(idea_plan: list[dict[str, Any]] | None, target_chars: int) -> 
                 "covers": supplied.get("covers") or chapter.intent,
                 "visual_intent": supplied.get("visual_intent", ""),
                 "chars": int(target_chars * chapter.share),
+                # A line count is something the model can actually hit; a
+                # character total is not. Asked only for 7,200 characters it
+                # wrote 2,566 — a third — because it cannot count as it writes.
+                "lines": max(2, round(target_chars * chapter.share / CHARS_PER_LINE)),
             }
         )
     return plan

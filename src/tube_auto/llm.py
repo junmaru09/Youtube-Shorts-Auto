@@ -47,7 +47,7 @@ class LLMResponse:
 @dataclass(slots=True)
 class LLMClient:
     model: str
-    max_tokens: int = 16000
+    max_tokens: int = 32000
     api_key: str | None = None
     _client: Any = field(default=None, init=False, repr=False)
 
@@ -85,7 +85,12 @@ class LLMClient:
         if temperature is not None:
             kwargs["temperature"] = temperature
 
-        response = self.client.messages.create(**kwargs)
+        # Streamed, because the script call asks for well over 16K output
+        # tokens — display and spoken text for every line, plus the model's own
+        # thinking, which counts against max_tokens on Sonnet 5 — and a
+        # non-streaming request that size hits the SDK's HTTP timeout.
+        with self.client.messages.stream(**kwargs) as stream:
+            response = stream.get_final_message()
         usage = getattr(response, "usage", None)
         input_tokens = getattr(usage, "input_tokens", 0) or 0
         output_tokens = getattr(usage, "output_tokens", 0) or 0

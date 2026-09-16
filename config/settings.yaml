@@ -78,7 +78,10 @@ research:
 llm:
   research_model: claude-sonnet-5
   script_model: claude-sonnet-5
-  max_tokens: 16000
+  # 台本1本は display と spoken の2本立てで約14,000字＋JSON。Sonnet 5 は既定で
+  # 思考トークンも使い、それも max_tokens に含まれる。16000 では足りず、
+  # モデルが枠を察して短く書く（実測: 7,200字の指示に2,566字で返した）。
+  max_tokens: 32000
   # 直近この件数の企画要約を渡して重複を避けさせる
   recent_context_size: 40
 

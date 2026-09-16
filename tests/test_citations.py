@@ -6,6 +6,7 @@ the channel's only durable advantage over the summary-rewriting channels, so it
 gets tested harder than its size suggests.
 """
 
+import pytest
 from tube_auto import citations
 
 
@@ -94,3 +95,42 @@ def test_the_message_names_what_went_wrong():
     described = report.describe()
     assert "S9" in described
     assert "S1" in described  # reported as never cited
+
+
+# --- the length target ---------------------------------------------------------
+
+
+def test_the_length_target_is_expressed_as_lines_the_model_can_count():
+    """Asked only for 7,200 characters the model wrote 2,566 — a third — because
+    a running character total is not something it can track while writing. A
+    per-chapter line count is."""
+    from tube_auto.stages.script import CHARS_PER_LINE, _chapter_plan, _user_prompt
+
+    plan = _chapter_plan(None, 7200)
+    assert all(c["lines"] >= 2 for c in plan)
+    assert sum(c["lines"] for c in plan) * CHARS_PER_LINE == pytest.approx(7200, rel=0.05)
+
+    prompt = _user_prompt(
+        {"hook": "t", "scene_summary": "q"}, [], plan, 7200
+    )
+    assert "行数は必ず満たす" in prompt
+    assert "hooks は必ず3案" in prompt
+
+
+def test_the_script_tool_is_strict():
+    """Without strict mode `minItems: 3` on hooks is advisory, and the model
+    returned zero — accepted by the API, rejected by validate() after the call
+    had already been paid for."""
+    from tube_auto.stages.script import SCRIPT_TOOL
+
+    assert SCRIPT_TOOL["strict"] is True
+
+    def walk(node):
+        if node.get("type") == "object":
+            assert node.get("additionalProperties") is False
+            for child in node.get("properties", {}).values():
+                walk(child)
+        if node.get("type") == "array":
+            walk(node["items"])
+
+    walk(SCRIPT_TOOL["input_schema"])
