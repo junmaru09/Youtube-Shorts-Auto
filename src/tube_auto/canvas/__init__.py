@@ -304,7 +304,7 @@ class Canvas:
             self.state.items.remove(existing)
         item = Item(name, "element", box, {"element": element, **props})
         self._register(item)
-        if slot not in ("sky", "floor", "wide", "top") and "box" not in op:
+        if slot not in ("sky", "floor") and "box" not in op:
             self._nudge_element(item, box)
 
     def _box_from(self, op: dict[str, Any]) -> Box:
@@ -482,44 +482,63 @@ class Canvas:
         return box
 
     def _nudge_element(self, item: Item, slot_box: Box) -> None:
-        """Shift a freshly placed element off any element already there.
+        """Shift a freshly placed element off anything already there.
 
         Two concepts both put at "center" should end up side by side, not on
-        top of each other. The slot box is moved and the element redrawn.
+        top of each other. Candidates are grid positions over the stage,
+        nearest first, at full size, then 72%, then 50%; the extent at a
+        candidate is the current extent translated (drawing is translation-
+        equivariant), so only the winner is redrawn. If nothing is free, the
+        least-overlapping candidate wins.
         """
         others = [i for i in self.state.items if i.kind in ("element", "label") and i is not item]
         fixed = [self.state.box_of(ref) for ref in ("heading", "title")
                  if getattr(self.state, ref) and not any(i.name == ref for i in self.state.items)]
+        obstacles = [o.bounds for o in others] + fixed
         mine = item.bounds
-        if not any(_overlaps(mine, o.bounds, 0) for o in others) and not any(_overlaps(mine, f, 0) for f in fixed):
+        if _inside_stage(mine) and not any(_overlaps(mine, o, 0) for o in obstacles):
             return
-        w, h = mine[2] - mine[0], mine[3] - mine[1]
-        candidates = []
-        pushed = _push_out(mine, [o.bounds for o in others] + fixed, margin=16)
-        if pushed is not None:
-            candidates.append((pushed[0] - mine[0], pushed[1] - mine[1]))
-        for k in (1, 2):
-            candidates += [((w + 40) * k, 0), (-(w + 40) * k, 0), (0, (h + 40) * k), (0, -(h + 40) * k)]
-        for scale in (1.0, 0.72, 0.5):
+
+        def extent_at(scale: float) -> tuple[Box, Box]:
+            """(slot box, extent) for the element drawn at `scale` of its slot."""
             sw, sh = (slot_box[2] - slot_box[0]) * scale, (slot_box[3] - slot_box[1]) * scale
             scx, scy = (slot_box[0] + slot_box[2]) / 2, (slot_box[1] + slot_box[3]) / 2
             base = (scx - sw / 2, scy - sh / 2, scx + sw / 2, scy + sh / 2)
-            for dx, dy in ([(0, 0)] if scale < 1 else []) + candidates:
-                moved_slot = (base[0] + dx, base[1] + dy, base[2] + dx, base[3] + dy)
-                item.box = moved_slot
-                scratch = Image.new("RGB", (S.WIDTH, S.HEIGHT))
-                parts = self._draw_element(scratch, ImageDraw.Draw(scratch), item)
-                own = parts.get("self", moved_slot)
-                if (_inside_stage(own) and not any(_overlaps(own, o.bounds, 0) for o in others)
-                        and not any(_overlaps(own, f, 0) for f in fixed)):
-                    item.parts = parts
-                    item.extent = tuple(own)
+            if scale == 1.0:
+                return base, mine
+            item.box = base
+            scratch = Image.new("RGB", (S.WIDTH, S.HEIGHT))
+            parts = self._draw_element(scratch, ImageDraw.Draw(scratch), item)
+            return base, tuple(parts.get("self", base))
+
+        ocx, ocy = (mine[0] + mine[2]) / 2, (mine[1] + mine[3]) / 2
+        grid = [(gx, gy) for gx in range(S.STAGE_FULL_LEFT, S.STAGE_FULL_RIGHT, 60)
+                for gy in range(40, S.STAGE_BOTTOM, 50)]
+        grid.sort(key=lambda g: (g[0] - ocx) ** 2 + (g[1] - ocy) ** 2)
+        best: tuple[float, Box, float] | None = None       # (overlap area, slot box, scale)
+        for scale in (1.0, 0.72, 0.5, 0.36):
+            base, ext = extent_at(scale)
+            ew, eh = ext[2] - ext[0], ext[3] - ext[1]
+            ecx, ecy = (ext[0] + ext[2]) / 2, (ext[1] + ext[3]) / 2
+            for gx, gy in grid:
+                dx, dy = gx - ecx, gy - ecy
+                moved = (ext[0] + dx, ext[1] + dy, ext[2] + dx, ext[3] + dy)
+                if not _inside_stage(moved):
+                    continue
+                area = sum(_overlap_area(moved, o) for o in obstacles)
+                if area == 0:
+                    self._settle(item, (base[0] + dx, base[1] + dy, base[2] + dx, base[3] + dy))
                     return
-        # nowhere free: back to where it was
-        item.box = slot_box
+                if best is None or area < best[0]:
+                    best = (area, (base[0] + dx, base[1] + dy, base[2] + dx, base[3] + dy), scale)
+        self._settle(item, best[1] if best else slot_box)
+
+    def _settle(self, item: Item, box: Box) -> None:
+        item.box = box
         scratch = Image.new("RGB", (S.WIDTH, S.HEIGHT))
         item.parts = self._draw_element(scratch, ImageDraw.Draw(scratch), item)
-        item.extent = tuple(item.parts.get("self", slot_box))
+        own = item.parts.get("self")
+        item.extent = tuple(own) if own else None
 
     def _target(self, ref: str) -> Box:
         """An arrow endpoint. Slots count as their centre point, not their
@@ -815,6 +834,12 @@ def _push_out(box: Box, others: list[Box], margin: float = 10, rounds: int = 8) 
         else:
             return None
     return box if not any(_overlaps(box, o, margin) for o in others) and _inside_stage(box) else None
+
+
+def _overlap_area(a: Box, b: Box) -> float:
+    w = min(a[2], b[2]) - max(a[0], b[0])
+    h = min(a[3], b[3]) - max(a[1], b[1])
+    return w * h if w > 0 and h > 0 else 0.0
 
 
 def _overlaps(a: Box, b: Box, margin: float = 8) -> bool:

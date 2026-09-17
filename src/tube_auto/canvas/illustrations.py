@@ -39,6 +39,19 @@ ILLUSTRATIONS: dict[str, tuple[str, str]] = {
     "dog": ("1f436", "犬"), "cat": ("1f431", "猫"), "bird": ("1f426", "鳥"), "fish": ("1f41f", "魚"), "whale": ("1f40b", "クジラ"),
     "dinosaur": ("1f996", "恐竜"), "butterfly": ("1f98b", "蝶"), "bacteria": ("1f9a0", "微生物"), "snowflake": ("2744", "雪の結晶"),
     "droplet": ("1f4a7", "水滴"), "hourglass": ("23f3", "砂時計"), "globe": ("1f310", "地球儀"), "map": ("1f5fa", "地図"),
+    # sound and music (a black hole's ringdown is a bell)
+    "bell": ("1f514", "鐘"), "drum": ("1f941", "太鼓"), "guitar": ("1f3b8", "ギター"), "violin": ("1f3bb", "バイオリン"),
+    "piano": ("1f3b9", "ピアノ"), "trumpet": ("1f3ba", "トランペット"), "speaker": ("1f50a", "スピーカー"), "note": ("1f3b5", "音符"),
+    "microphone": ("1f3a4", "マイク"), "headphones": ("1f3a7", "ヘッドホン"), "tuning_fork": ("1f3bc", "楽譜"),
+    "wave_sound": ("1f4e2", "拡声器"), "ripple": ("1f30a", "波紋"),
+    # more everyday
+    "balloon": ("1f388", "風船"), "spring": ("1f9f7", "安全ピン"), "rope": ("1faa2", "ロープ"), "rock": ("1faa8", "岩"),
+    "bread": ("1f35e", "パン"), "egg": ("1f95a", "卵"), "milk": ("1f95b", "牛乳"), "salt": ("1f9c2", "塩"),
+    "bath": ("1f6c1", "お風呂"), "sponge": ("1f9fd", "スポンジ"), "elevator": ("1f6d7", "エレベーター"), "stairs": ("1f6d7", "階段"),
+    "trophy": ("1f3c6", "トロフィー"), "target": ("1f3af", "的"), "dice": ("1f3b2", "サイコロ"), "puzzle": ("1f9e9", "パズル"),
+    "key": ("1f511", "鍵"), "lock": ("1f512", "錠"), "package": ("1f4e6", "箱"), "scissors": ("2702", "はさみ"),
+    "hammer": ("1f528", "ハンマー"), "wrench": ("1f527", "スパナ"), "link": ("1f517", "鎖"), "chart_up": ("1f4c8", "上がるグラフ"),
+    "chart_down": ("1f4c9", "下がるグラフ"), "shield": ("1f6e1", "盾"), "crystal_ball": ("1f52e", "水晶玉"), "dizzy": ("1f4ab", "目が回る"),
 }
 
 
