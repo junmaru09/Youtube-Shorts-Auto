@@ -130,6 +130,8 @@ class Line:
     expression: str = "normal"
     # set by validation: the visual could not be applied (not stored)
     broken: bool = False
+    # the visual was dropped to `hold` at script time; stored, for the quality gate
+    dropped: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -140,6 +142,7 @@ class Line:
             "visual": self.visual,
             "ops": self.ops,
             "expression": self.expression,
+            "_dropped": self.dropped,
         }
 
     @classmethod
@@ -152,6 +155,7 @@ class Line:
             visual=line.get("visual", []),
             ops=line.get("ops", []),
             expression=line.get("expression", "normal") or "normal",
+            dropped=bool(line.get("_dropped", False)),
         )
 
 

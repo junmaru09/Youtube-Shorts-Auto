@@ -31,7 +31,20 @@ from typing import Any
 from .. import bgm
 from .. import brand as brand_mod
 from .. import config, db, ffmpeg, paths
+from .. import quality
 from . import whiteboard
+
+
+def _dropped_visuals(script_row) -> int:
+    """Lines whose visual was dropped to `hold` at script time: a `hold`
+    visual is the script's own, an empty ops list under a non-hold visual
+    is a drop."""
+    try:
+        chapters = json.loads(script_row["chapters_json"])
+    except (TypeError, ValueError):
+        return 0
+    return sum(1 for c in chapters for line in c.get("lines", [])
+               if line.get("visual") == ["hold"] and line.get("_dropped"))
 
 log = logging.getLogger(__name__)
 
@@ -349,6 +362,14 @@ def run(limit: int = 1, idea_id: int | None = None) -> AssembleResult:
                 continue
 
             info = ffmpeg.video_info(output)
+            report = quality.score(timeline, dropped_visuals=_dropped_visuals(script_row),
+                                   thresholds=settings.get("quality", {}))
+            report_path = paths.WORK_DIR / "logs" / f"quality_idea{current_id:05d}.md"
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(f"# idea {current_id}\n\n{report.describe()}\n", encoding="utf-8")
+            if not report.ok:
+                log.warning("idea %d is below the quality bar: %s", current_id, "; ".join(report.problems))
+                result.errors.append(f"idea {current_id} (品質基準未満、{report_path}): " + "; ".join(report.problems))
             db.upsert_render(
                 conn,
                 idea_id=current_id,

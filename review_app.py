@@ -131,6 +131,16 @@ for idea in pending:
             f"#{idea_id} · {idea['series_id']} · {minutes:.1f}分 · "
             f"素材 {len(assets)}点 · 出典 {len(sources)}件"
         )
+        # the automatic score assemble wrote; a failing one is a reason to
+        # reject before watching twenty minutes
+        report = paths.WORK_DIR / "logs" / f"quality_idea{idea_id:05d}.md"
+        if report.exists():
+            text = report.read_text(encoding="utf-8")
+            (st.error if "基準未満" in text else st.success)(text.split("\n", 2)[-1])
+        preview = paths.WORK_DIR / "logs" / f"script_idea{idea_id:05d}_preview.png"
+        if preview.exists():
+            with st.expander("台本時点の図のプレビュー"):
+                st.image(str(preview))
 
     with right:
         title = st.text_input("タイトル", value=idea["hook"], key=f"title_{idea_id}")

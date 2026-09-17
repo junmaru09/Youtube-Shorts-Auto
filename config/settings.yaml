@@ -147,6 +147,15 @@ postprocess:
   # 実測でダッキング量は7.7dB（放送で音楽を声の下に敷くときの標準域6〜10dB）。
   bgm_gain_db: -22.0
 
+# 合成後の自動採点。基準未満でも動画は作るが、レビュー画面と CLI に理由を出し、
+# 投稿の前に直す。数値は参考チャンネル5本の実測（5〜13回/分、最長静止67〜133秒＝冒頭の部屋）から。
+quality:
+  min_changes_per_minute: 4
+  max_static_seconds: 40
+  max_three_row_subtitles: 0.05
+  max_dropped_visuals: 6
+  min_minutes: 8
+
 review:
   reason_tags:
     - 事実が怪しい

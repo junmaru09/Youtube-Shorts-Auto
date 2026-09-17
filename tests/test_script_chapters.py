@@ -147,3 +147,22 @@ def test_opener_must_start_plain_and_with_the_listener():
     problems = script_stage.check_chapter(ch("listener", "ダークエネルギーって知ってる？"), brief, Canvas(), set())
     assert any("専門語" in p for p in problems)
     assert not script_stage.check_chapter(ch("listener", "コンビニでアイスクリーム買ったの"), brief, Canvas(), set())
+
+
+def test_each_chapter_needs_its_kind_of_figure_and_the_persona_holds():
+    from tube_auto.canvas import Canvas
+    from tube_auto.models import Chapter, Line
+
+    def ch(visuals, endings="のだ"):
+        lines = [Line("explainer", f"説明{i}{endings}", "", visual=v) for i, v in enumerate(visuals)]
+        lines[0].visual = ["clear"] + lines[0].visual
+        return Chapter(key="mechanism1", title="t", lines=lines)
+    brief = {"key": "mechanism1", "lines": 5}
+    only_labels = ch([["label a at=top"], ["label b at=bottom"], ["arrow from=a to=b"], ["label c at=left"], ["hold"]])
+    problems = script_stage.check_chapter(only_labels, brief, Canvas(), set())
+    assert any("図の型" in p for p in problems)
+    with_chain = ch([["chain name=c nodes=甲:0.2:0.2|乙:0.8:0.8 edges=0-1"], ["label a at=top"], ["hold"], ["label c at=left"], ["hold"]])
+    assert not script_stage.check_chapter(with_chain, brief, Canvas(), set())
+    plain = ch([["chain name=c nodes=甲:0.2:0.2|乙:0.8:0.8 edges=0-1"], ["label a at=top"], ["hold"], ["label c at=left"], ["hold"]], endings="です")
+    problems = script_stage.check_chapter(plain, brief, Canvas(), set())
+    assert any("語尾" in p for p in problems)

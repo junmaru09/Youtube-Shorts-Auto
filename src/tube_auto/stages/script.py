@@ -391,6 +391,17 @@ LISTENER_SHARE = (0.15, 0.50)
 MAX_HOLD_RUN = 3
 MAX_HOLD_RUN_ROOM = 5
 ROOM_CHAPTERS = {"opener", "close"}
+# The figure each chapter must have at least one of, by op or element name.
+# The first scripts leaned on label+arrow everywhere; this is what the
+# reference does chapter by chapter.
+REQUIRED_FIGURES: dict[str, set[str]] = {
+    "context": {"timeline", "pie", "compare", "scatter", "earth_arc", "earth_globe", "columns", "ladder", "box_row"},
+    "history": {"heading", "person", "telescope", "timeline"},
+    "mechanism1": {"chain", "columns", "table", "scatter", "wave", "balance", "panel", "pie", "compare"},
+    "mechanism2": {"chain", "columns", "table", "scatter", "wave", "balance", "panel", "pie", "compare"},
+    "replay": {"chain", "columns", "table", "scatter", "timeline", "pie", "earth_arc", "compare", "wave"},
+}
+
 # Katakana words of six or more that are everyday, not jargon, for the
 # opener check.
 OPENER_OK_KATAKANA = {"インターネット", "スマートフォン", "コンビニ", "テレビ", "ニュース", "アイスクリーム",
@@ -519,6 +530,19 @@ def check_chapter(chapter: Chapter, brief: dict[str, Any], canvas: Canvas, known
         problems.append(f"{len(report.uncited)} 行が数値を出典なしで述べている: " + "; ".join(u[:30] for u in report.uncited[:3]))
     if report.unknown_refs:
         problems.append(f"存在しない出典ID: {sorted(set(report.unknown_refs))}")
+
+    wanted_figures = REQUIRED_FIGURES.get(chapter.key)
+    if wanted_figures:
+        used = {op.get("op") for line in chapter.lines for op in (line.ops or [])}
+        used |= {op.get("element") for line in chapter.lines for op in (line.ops or []) if op.get("op") in ("place", "add")}
+        if not used & wanted_figures:
+            problems.append(f"{chapter.key} には {' / '.join(sorted(wanted_figures))} のどれかを1つは使うこと（この章の図の型）")
+
+    explainer_lines = [line for line in chapter.lines if line.speaker == "explainer"]
+    if len(explainer_lines) >= 4:
+        noda = sum(1 for line in explainer_lines if re.search(r"のだ[。！？!?」]*$", line.display.rstrip()))
+        if noda / len(explainer_lines) < 0.5:
+            problems.append(f"ずんだもんの語尾「〜のだ」が {noda}/{len(explainer_lines)} 行しかない（半分以上に）")
 
     if chapter.key == "opener":
         first = chapter.lines[0]
@@ -807,6 +831,7 @@ def write_chapters(client, system: list[str], plan: list[dict[str, Any]], known_
                 if getattr(line, "broken", False):
                     line.ops = [{"op": "hold"}]
                     line.visual = ["hold"]
+                    line.dropped = True
                     dropped += 1
             for line in chapter.lines:
                 for op in line.ops:
