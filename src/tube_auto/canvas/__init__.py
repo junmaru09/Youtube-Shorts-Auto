@@ -598,6 +598,7 @@ def _placeholder_sprites(img: Image.Image, speaker: str, only: str | None = None
         if only and who != only:
             continue
         x, y = xy
+        x += (S.SPRITE_WIDTH - S.SPRITE_SIZE) // 2
         shade = colour if who == speaker else tuple(int(c * 0.72) for c in colour)
         d.ellipse((x + 20, y + 20, x + S.SPRITE_SIZE - 20, y + S.SPRITE_SIZE - 20), fill=shade, outline=S.INK, width=S.OUTLINE_SHAPE)
         D.outlined_text(d, (x + S.SPRITE_SIZE / 2, y + S.SPRITE_SIZE / 2), label, 44, S.WHITE)
@@ -686,11 +687,13 @@ class SpriteSet:
             if sprite is None:
                 _placeholder_sprites(img, speaker or "", only=role)
                 continue
-            scale = S.SPRITE_SIZE / max(sprite.width, sprite.height)
-            sprite = sprite.resize((round(sprite.width * scale), round(sprite.height * scale)), Image.LANCZOS)
+            x, y = xy
+            scale = S.SPRITE_WIDTH / sprite.width
+            visible = min(round(sprite.height * scale), S.BAND_TOP + S.SPRITE_CUT - y)
+            sprite = sprite.resize((S.SPRITE_WIDTH, round(sprite.height * scale)), Image.LANCZOS)
+            sprite = sprite.crop((0, 0, S.SPRITE_WIDTH, visible))
             if not talking:
                 r, g, b, a = sprite.split()
                 sprite = Image.merge("RGBA", (r.point(lambda v: int(v * 0.82)), g.point(lambda v: int(v * 0.82)),
                                               b.point(lambda v: int(v * 0.82)), a))
-            x, y = xy
-            img.paste(sprite, (x + (S.SPRITE_SIZE - sprite.width) // 2, y + S.SPRITE_SIZE - sprite.height), sprite)
+            img.paste(sprite, (x, y), sprite)

@@ -109,7 +109,7 @@ DEFAULT_BRAND: dict[str, Any] = {
         "border": 6,
     },
     "disclosure": "※この動画の台本と図解は生成AIを使って制作しています。",
-    "credit_line": "VOICEVOX:ずんだもん / VOICEVOX:四国めたん / Images: NASA (public domain)。NASAは本チャンネルを推奨していません。",
+    "credit_line": "VOICEVOX:ずんだもん / VOICEVOX:四国めたん / 立ち絵: 坂本アヒル / Images: NASA (public domain)。NASAは本チャンネルを推奨していません。",
 }
 
 

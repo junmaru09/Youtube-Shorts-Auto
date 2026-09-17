@@ -1,2 +1,15 @@
 # 1ファイル1エントリ。file / source / licence / credit を必ず書く。
-[]
+- file: sprites/zundamon/*.png
+  source: https://seiga.nicovideo.jp/seiga/im11206626
+  title: ずんだもん立ち絵素材V3.2（基本版）
+  author: 坂本アヒル
+  licence: 作者「公式の規約の範囲なら何に使ってもよい」＋ 東北ずん子・ずんだもんプロジェクト ガイドライン https://zunko.jp/guideline.html
+  credit: "立ち絵: 坂本アヒル"
+  cut_with: tools/sprite_export.py --recipe config/sprites/zundamon.yaml
+- file: sprites/metan/*.png
+  source: https://seiga.nicovideo.jp/seiga/im10791276
+  title: 四国めたん立ち絵素材2.1
+  author: 坂本アヒル
+  licence: 作者「公式の規約の範囲なら何に使ってもよい」＋ 東北ずん子・ずんだもんプロジェクト ガイドライン https://zunko.jp/guideline.html
+  credit: "立ち絵: 坂本アヒル"
+  cut_with: tools/sprite_export.py --recipe config/sprites/metan.yaml

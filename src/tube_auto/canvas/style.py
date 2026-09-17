@@ -22,10 +22,16 @@ BAND_TOP = 870
 
 # Sprites sit in the bottom corners, mostly above the band: measured heads
 # span y 615-900 at 1080p, so they overlap the band's top edge by ~30px.
-SPRITE_SIZE = 320
+# The art is full-body; it is scaled to SPRITE_WIDTH, its top put at
+# SPRITE_TOP, and everything below the band's edge cut off, so what shows
+# is the head and shoulders at the reference's size and the body is
+# simply not there under the subtitles.
+SPRITE_SIZE = 320                 # the placeholder circles
+SPRITE_WIDTH = 400
 SPRITE_TOP = 600
-SPRITE_LEFT = (30, SPRITE_TOP)
-SPRITE_RIGHT = (WIDTH - SPRITE_SIZE - 30, SPRITE_TOP)
+SPRITE_CUT = 24                   # px of chin allowed over the band
+SPRITE_LEFT = (20, SPRITE_TOP)
+SPRITE_RIGHT = (WIDTH - SPRITE_WIDTH - 20, SPRITE_TOP)
 
 # The stage: where figures go. Above the sprites' heads it is nearly the
 # full frame width (the reference puts tables and box rows at x=120); level
