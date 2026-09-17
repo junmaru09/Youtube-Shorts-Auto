@@ -78,6 +78,9 @@ def check(chapters: list[dict], known_refs: set[str]) -> CitationReport:
     """Validate a script's citations against the refs research collected."""
     report = CitationReport()
     used: set[str] = set()
+    # numbers stated with a citation in the last two lines; the listener
+    # repeating "たった5パーセント？" is dialogue, not a new claim
+    recent_cited: list[set[str]] = []
 
     for chapter in chapters:
         for line in chapter.get("lines", []):
@@ -89,8 +92,12 @@ def check(chapters: list[dict], known_refs: set[str]) -> CitationReport:
                 if ref not in known_refs:
                     report.unknown_refs.append(ref)
 
+            numbers = {m.group(0).replace(" ", "") for m in NUMBER_PATTERN.finditer(display)}
             if carries_a_claim(display) and not refs:
-                report.uncited.append(display)
+                echoed = numbers and numbers <= set().union(*recent_cited[-2:]) if recent_cited else False
+                if not echoed:
+                    report.uncited.append(display)
+            recent_cited.append(numbers if refs else set())
 
     report.unused_refs = sorted(known_refs - used)
     return report

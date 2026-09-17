@@ -69,6 +69,10 @@ def _slots() -> dict[str, Box]:
 
 SLOTS = _slots()
 
+# Label sizes by name, for scripts that say `size=large`.
+NAMED_SIZES = {"small": S.SIZE_LABEL_SMALL, "normal": S.SIZE_LABEL, "medium": S.SIZE_LABEL,
+               "large": 66, "big": 66, "huge": S.SIZE_TITLE, "title": S.SIZE_TITLE}
+
 # An arrow's `to` may be a compass direction instead of a target: "bounce
 # up-right off the ice". Unit vectors, screen coordinates (y down).
 DIRECTIONS = {
@@ -110,7 +114,12 @@ class State:
         for item in self.items:
             if item.name == name:
                 return item
-        raise CanvasError(f"no item named {name!r} on the stage")
+        # "arrow", "label": the most recent item of that kind, which is what
+        # a script means when it names none
+        for item in reversed(self.items):
+            if item.kind == name:
+                return item
+        raise CanvasError(f"no item named {name!r} on the stage (items: {[i.name for i in self.items][-8:]})")
 
     def box_of(self, ref: str) -> Box:
         """A slot name, an item name, or item.part."""
@@ -159,7 +168,9 @@ class Canvas:
         except KeyError as exc:
             # a missing argument, or an element given a prop it does not take
             raise CanvasError(f"{kind}: missing {exc}") from exc
-        except TypeError as exc:
+        except (TypeError, ValueError, AttributeError, IndexError) as exc:
+            # a wrong-typed argument; the script stage turns this into a
+            # rejection with the line, rather than a crash without one
             raise CanvasError(f"{kind}: {exc}") from exc
 
     def _register(self, item: Item) -> None:
@@ -279,7 +290,12 @@ class Canvas:
     def _op_label(self, op: dict[str, Any]) -> None:
         text = str(op["text"])
         at = op.get("at", "center")
-        size = int(op.get("size", S.SIZE_LABEL))
+        size = op.get("size", S.SIZE_LABEL)
+        if isinstance(size, str):
+            size = NAMED_SIZES.get(size.lower())
+            if size is None:
+                raise CanvasError(f"unknown size {op['size']!r}; a number or one of {sorted(NAMED_SIZES)}")
+        size = int(size)
         colour = op.get("colour", "white")
         if colour not in S.PALETTE:
             raise CanvasError(f"unknown colour {colour!r}; one of {sorted(S.PALETTE)}")

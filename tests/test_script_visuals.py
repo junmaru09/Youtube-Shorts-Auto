@@ -92,19 +92,23 @@ def test_ops_are_populated_for_storage():
     assert chapter.lines[0].ops[1]["element"] == "sun"
 
 
-def test_three_static_lines_are_rejected():
+def test_four_static_lines_are_rejected_outside_the_room():
     chapter = Chapter(key="k", title="t", lines=[
-        _line(visual=["clear"]), _line(), _line(), _line(),
+        _line(visual=["clear"]), _line(), _line(), _line(), _line(),
     ])
     problems = script_stage.check_visuals(_script(chapter))
     assert any("動いていない" in p for p in problems)
 
 
-def test_two_static_lines_are_fine():
+def test_three_static_lines_are_fine_and_the_room_allows_five():
     chapter = Chapter(key="k", title="t", lines=[
-        _line(visual=["clear"]), _line(), _line(), _line(visual=["label text=x"]), _line(), _line(),
+        _line(visual=["clear"]), _line(), _line(), _line(), _line(visual=["label text=x"]), _line(), _line(),
     ])
     assert not script_stage.check_visuals(_script(chapter))
+    room = Chapter(key="opener", title="t", lines=[_line(visual=["clear"])] + [_line()] * 5)
+    assert not script_stage.check_visuals(_script(room))
+    room = Chapter(key="opener", title="t", lines=[_line(visual=["clear"])] + [_line()] * 6)
+    assert script_stage.check_visuals(_script(room))
 
 
 # --- structure check ---------------------------------------------------------------

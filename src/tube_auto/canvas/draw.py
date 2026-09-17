@@ -46,10 +46,10 @@ def _is_symbol(ch: str) -> bool:
     return any(lo <= code <= hi for lo, hi in _SYMBOL_RANGES)
 
 
-def _runs(text: str) -> list[tuple[str, str]]:
+def _runs(text) -> list[tuple[str, str]]:
     """Split text into (run, kind): kind is "text", "symbol", or a mark name."""
     runs: list[tuple[str, str]] = []
-    for ch in text:
+    for ch in str(text):          # `timeline start=1929` arrives as an int
         kind = MARKS.get(ch) or ("symbol" if _is_symbol(ch) else "text")
         if kind in MARKS.values():
             runs.append((ch, kind))
@@ -124,6 +124,7 @@ def outlined_text(
     M PLUS 2 has no ◎ → ↑ ％ and PIL does no fallback itself.
     """
     ow = width if width is not None else max(3, round(size * 0.11))
+    text = str(text)
     runs = _runs(text)
     if len(runs) == 1 and runs[0][1] == "text":
         draw.text(xy, text, font=font(size, heavy), fill=fill, anchor=anchor,

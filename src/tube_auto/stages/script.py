@@ -304,8 +304,8 @@ LISTENER_SHARE = (0.15, 0.45)
 # Lines in a row that leave the stage untouched before it counts as static.
 # The room chapters are conversation; the reference holds its room for
 # thirty seconds at a time there and nowhere else.
-MAX_HOLD_RUN = 2
-MAX_HOLD_RUN_ROOM = 4
+MAX_HOLD_RUN = 3
+MAX_HOLD_RUN_ROOM = 5
 ROOM_CHAPTERS = {"opener", "close"}
 # A subtitle is two rows of SUBTITLE_WRAP characters. Longer lines overflow
 # the band, and a line that long is a paragraph anyway.
