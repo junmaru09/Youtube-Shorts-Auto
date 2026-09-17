@@ -6,12 +6,12 @@ headline is a grey smear. So the governing constraint is not "make an image" but
 **at most about nine characters, enormous** — everything else here follows from
 that.
 
-The background comes from the episode's own NASA stills rather than a generated
-illustration. Three reasons: the stills are already downloaded and already
-rights-cleared, so no new spend and no new licence question; a real telescope
-image is the thing this channel actually has and a summary channel does not; and
-generated cover art is precisely what YouTube's inauthentic-content rules are
-looking at.
+The picture is the channel's: ずんだもん's face, large, on one side, the
+words on the other, over the episode's own NASA still when footage found
+one (dimmed, so the words win) or the drawn starfield when it did not. A
+face at feed size is what the format's viewers scan for; text alone over a
+telescope image read as any science channel. Nothing is generated — the
+sprite, the still and the type are all assets already cleared.
 
 The three variants are different *arguments*, not three crops of the same idea:
 a number, a question, and the bare subject. YouTube's Test & Compare picks a
@@ -50,9 +50,18 @@ MAX_LINES = 2
 # The duration badge sits in the bottom-right corner, so nothing important goes
 # there. The text block is centred in the upper two thirds.
 TEXT_CENTRE_Y = 0.42
-# The stroke around each glyph adds to its width, so the nominal safe area has to
-# leave room for it — at 0.88 the longest line ran into both edges.
-SAFE_WIDTH = 0.82
+# The words take the left of the frame; the character takes the right. The
+# stroke around each glyph adds to its width, so the text area leaves room.
+SAFE_WIDTH = 0.62
+TEXT_LEFT = 0.04
+# The character is head and shoulders only, big: the top of the 立ち絵 is
+# scaled so the head fills over half the frame's height, and it hangs off
+# the right edge a little.
+SPRITE_CROP = 0.42                   # of the sprite's height kept (head + shoulders)
+SPRITE_HEIGHT = 0.86                 # of the frame, for that cropped part
+SPRITE_CENTRE_X = 0.80
+# Which face goes with which argument.
+SPRITE_EXPRESSION = {"number": "surprised", "question": "thinking", "subject": "happy"}
 
 VARIANTS = ("number", "question", "subject")
 
@@ -168,10 +177,25 @@ def _question(hooks: list[str], title: str) -> str | None:
 def _subject(title: str) -> str:
     """The title, cut to what survives at feed size."""
     core = _tighten(title)
+    parts = [core]
     for separator in ("、", "――", "—", "：", ":"):
-        if separator in core:
-            core = core.split(separator)[0]
-    return core[:COPY_BUDGET] if core else "宇宙"
+        parts = [piece for part in parts for piece in part.split(separator) if piece.strip()]
+    if len(parts) > 1:
+        # the phrase with the question in it, else the longest: "なぜ地球は
+        # 凍り付いたのか" over "7億年前"
+        asking = [p for p in parts if any(w in p for w in ("なぜ", "どう", "何", "？", "?"))]
+        core = max(asking or parts, key=len)
+    if len(core) > COPY_BUDGET:
+        # cut at a phrase boundary inside the budget when there is one, and
+        # never end on a particle: 「鐘の音」に is a fragment, 「鐘の音」 is a subject
+        cut = core[:COPY_BUDGET]
+        for i in range(len(cut) - 1, max(6, len(cut) - 6), -1):
+            if cut[i - 1] in "」）" or cut[i] in "はがをにでとのもへ":
+                cut = cut[:i]
+                break
+        core = cut
+    core = core.rstrip("はがをにでとのもへ、")
+    return core if core else "宇宙"
 
 
 def _trim_head(text: str, budget: int) -> str:
@@ -279,6 +303,9 @@ def _break_score(text: str, index: int, middle: float) -> float:
         score += 100
     elif _char_class(text[index - 1]) != _char_class(text[index]):
         score += 50
+    if text[index] in "はがをにでとのもへ、。？！":
+        # a line must not open with a particle: "まで / に何が" reads as a typo
+        score -= 120
     return score
 
 
@@ -317,87 +344,72 @@ def _draw(
     brand: brand_mod.Brand,
     accent: bool,
     caption: str = "",
+    expression: str = "surprised",
 ) -> Path:
-    """Composite one thumbnail."""
-    font = ffmpeg.find_font(brand.font_path)
+    """Composite one thumbnail: background, dimmed; the character on the
+    right; the words on the left, huge, outlined."""
+    from PIL import Image, ImageDraw, ImageFilter
+
+    from ..canvas import SpriteSet
+    from ..canvas import draw as D
+    from ..canvas import style as S
+
+    # background: the still, covered and dimmed, or the starfield
+    if background is not None:
+        try:
+            img = D.dimmed_photo(Image.open(background), WIDTH, HEIGHT, factor=0.5)
+        except OSError:
+            img = D.starfield(WIDTH, HEIGHT, seed=1)
+    else:
+        img = D.starfield(WIDTH, HEIGHT, seed=1)
+    # a vignette towards the text side keeps the words on a quiet ground
+    shade = Image.new("L", (WIDTH, HEIGHT), 0)
+    ImageDraw.Draw(shade).rectangle((0, 0, int(WIDTH * 0.62), HEIGHT), fill=110)
+    shade = shade.filter(ImageFilter.GaussianBlur(90))
+    img = Image.composite(Image.new("RGB", (WIDTH, HEIGHT), (0, 0, 0)), img, shade)
+
+    # the character, right, big, body off the bottom edge
+    sprites = SpriteSet(paths.SPRITES_DIR, {role: nav.sprite for role, nav in brand.navigators.items()})
+    sprite = sprites._load(brand.explainer.sprite, expression, False) if brand.explainer.sprite else None
+    if sprite is not None:
+        head = sprite.crop((0, 0, sprite.width, int(sprite.height * SPRITE_CROP)))
+        scale = (HEIGHT * SPRITE_HEIGHT) / head.height
+        head = head.resize((round(head.width * scale), round(head.height * scale)), Image.LANCZOS)
+        # face the words: the art faces the viewer's right, so mirror it
+        head = head.transpose(Image.FLIP_LEFT_RIGHT)
+        x = int(WIDTH * SPRITE_CENTRE_X) - head.width // 2
+        y = HEIGHT - head.height + int(HEIGHT * 0.06)
+        img.paste(head, (x, y), head)
+
+    d = ImageDraw.Draw(img)
     size = _font_size(len(lines), max(len(line) for line in lines))
-    border = max(6, size // 14)
-    gap = int(size * 0.16)
+    gap = int(size * 0.14)
     caption_size = int(size * 0.34) if caption else 0
-    block = len(lines) * size + (len(lines) - 1) * gap
-    if caption:
-        block += caption_size + gap
-
-    filters = [
-        f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=increase",
-        f"crop={WIDTH}:{HEIGHT}",
-        # An even darkening, not a panel behind the text. A box drew hard grey
-        # edges across the picture, which is the single clearest tell of an
-        # auto-generated thumbnail.
-        f"drawbox=x=0:y=0:w={WIDTH}:h={HEIGHT}:color=black@0.45:t=fill",
-    ]
-
-    text_files: list[Path] = []
+    block = len(lines) * size + (len(lines) - 1) * gap + ((caption_size + gap) if caption else 0)
     top = int(HEIGHT * TEXT_CENTRE_Y - block / 2)
-
-    def draw(text: str, y: int, font_size: int, colour: str) -> None:
-        text_file = output.parent / f"{output.stem}_{len(text_files)}.txt"
-        text_file.write_text(text, encoding="utf-8")
-        text_files.append(text_file)
-        filters.append(
-            f"drawtext=fontfile='{_escape(font)}':textfile='{_escape(text_file)}'"
-            f":expansion=none:fontsize={font_size}:fontcolor={colour}"
-            f":borderw={max(4, font_size // 14)}:bordercolor=black@0.92"
-            f":x=(w-text_w)/2:y={y}"
-        )
-
+    left = int(WIDTH * TEXT_LEFT)
+    ink = (255, 255, 255)
+    accent_colour = (255, 222, 64)
     cursor = top
     if caption:
-        # A number with no subject is a number. "1200万キロ" could be anything.
-        draw(caption, cursor, caption_size, brand.palette["sub"])
+        D.outlined_text(d, (left, cursor), caption, caption_size, (200, 214, 240), anchor="la",
+                        outline=(0, 0, 0), width=max(4, caption_size // 10))
         cursor += caption_size + gap
     for index, line in enumerate(lines):
-        colour = brand.palette["accent"] if (accent and index == 0) else brand.palette["ink"]
-        draw(line, cursor + index * (size + gap), size, colour)
+        colour = accent_colour if (accent and index == 0) or (not accent and index == len(lines) - 1 and len(lines) > 1) else ink
+        D.outlined_text(d, (left, cursor + index * (size + gap)), line, size, colour, anchor="la",
+                        outline=(0, 0, 0), width=max(8, size // 9))
+    # the channel's yellow rule under the block, as on the subtitle band
+    rule_y = cursor + len(lines) * (size + gap) + 6
+    d.rectangle((left, rule_y, left + int(WIDTH * 0.20), rule_y + 10), fill=accent_colour)
 
-    # Only under a single line, where it anchors the composition. Under a
-    # two-line block that already fills the frame it reads as a stray mark, or
-    # worse, as a strikethrough on the last line.
-    if len(lines) == 1:
-        # drawtext's y is the top of a box taller than the glyphs, so clearance
-        # is measured generously — at exactly one font size the rule sat close
-        # enough to the characters to read as an underline.
-        rule_y = cursor + int(size * 1.30) + border
-        rule_width = int(WIDTH * 0.22)
-        filters.append(
-            f"drawbox=x=(iw-{rule_width})/2:y={min(rule_y, HEIGHT - 40)}"
-            f":w={rule_width}:h=8:color={brand.palette['accent']}:t=fill"
-        )
-
-    source = (
-        ["-i", str(background)]
-        if background
-        else ["-f", "lavfi", "-i", f"color={brand.palette['bg']}:s={WIDTH}x{HEIGHT}"]
-    )
-
-    try:
-        for quality in JPEG_QUALITY_STEPS:
-            ffmpeg._run([
-                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                *source, "-frames:v", "1",
-                "-vf", ",".join(filters),
-                "-q:v", str(quality), str(output),
-            ], timeout=120)
-            if output.stat().st_size <= MAX_BYTES:
-                break
-        else:
-            raise ffmpeg.FFmpegError(
-                f"{output.name} is {output.stat().st_size} bytes even at the lowest "
-                f"quality; YouTube's limit is {MAX_BYTES}"
-            )
-    finally:
-        for text_file in text_files:
-            text_file.unlink(missing_ok=True)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    for quality in (92, 85, 78, 70, 60):
+        img.save(output, "JPEG", quality=quality, optimize=True)
+        if output.stat().st_size <= MAX_BYTES:
+            break
+    else:
+        raise ffmpeg.FFmpegError(f"{output.name} is over YouTube's {MAX_BYTES}-byte limit at every quality")
     return output
 
 
@@ -424,7 +436,7 @@ def build(idea_id: int, title: str, hooks: list[str], script_text: str, assets: 
         if name == "number" and copy["number"] != subject:
             caption = _topic(title, MAX_CHARS_PER_LINE + 4)
         _draw(lines, _pick_background(assets, index), output, brand,
-              accent=(name == "number"), caption=caption)
+              accent=(name == "number"), caption=caption, expression=SPRITE_EXPRESSION[name])
         made.append(output)
         log.info("thumbnail %s for idea %d: %s", name, idea_id, " / ".join(lines))
     return made
