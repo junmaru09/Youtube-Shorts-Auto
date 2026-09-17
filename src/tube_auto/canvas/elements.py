@@ -569,10 +569,27 @@ def columns(d: ImageDraw.ImageDraw, box: Box, items: list[dict[str, Any]], **_: 
     return parts
 
 
+def concept(d: ImageDraw.ImageDraw, box: Box, text: str = "", **_: Any) -> Parts:
+    """A word in a box: the stand-in for an idea that has no picture
+    ("測り方A" / "測り方B"). Same look as box_row's boxes."""
+    x0, y0, x1, y1 = box
+    lines = str(text).split("\n") if text else [""]
+    size = S.SIZE_LABEL
+    tw = max(text_size(line, size)[0] for line in lines)
+    th = size * 1.3 * len(lines)
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    w, h = min(x1 - x0, tw + 150), min(y1 - y0, th + 70)
+    b = (cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2)
+    d.rectangle(b, outline=S.INK, width=9)
+    d.rectangle((b[0] + 2, b[1] + 2, b[2] - 2, b[3] - 2), outline=S.WHITE, width=5)
+    outlined_lines(d, (cx, cy), lines, size, S.WHITE)
+    return {"self": b}
+
+
 REGISTRY = {
     "sun": sun, "earth_globe": earth_globe, "earth_arc": earth_arc, "moon": moon,
     "star_dots": star_dots, "galaxy": galaxy, "black_blob": black_blob,
     "ice_block": ice_block, "cloud": cloud, "atom": atom, "charge": charge,
     "pie": pie, "box_row": box_row, "timeline": timeline, "number_line": number_line,
-    "table": table, "chain": chain, "grid_panel": grid_panel, "columns": columns,
+    "table": table, "chain": chain, "grid_panel": grid_panel, "columns": columns, "concept": concept,
 }

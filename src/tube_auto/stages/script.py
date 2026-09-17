@@ -43,7 +43,7 @@ LENGTH_TOLERANCE = 0.30
 # Calibrated, not chosen: asked for 120 lines "of about 60 characters" the
 # model delivered 5,058 characters, so its natural line runs about 42. The
 # figure here is what it actually writes, and the line count is derived from it.
-CHARS_PER_LINE = 40
+CHARS_PER_LINE = 33
 
 SCRIPT_TOOL = {
     "name": "submit_script",
@@ -161,7 +161,7 @@ def _system_prompt(brand: brand_mod.Brand, theme, target_chars: int) -> str:
   言い換え「要するに〜ってことなのね」、驚き「え、本当にそんなことが？」、次の疑問。
   全体の**4分の1前後**（20〜40%）を listener が話す。相槌だけの行は禁止。
 - 「章末は疑問で終える」と指定された章は、最後の行を疑問文にする。次の章がそれに答える。
-- 1行は1〜2文、字幕は30字×2行に収まる長さ（display は60字以内）。最後の行は「{brand.closing_line}」。
+- 1行は1〜2文、字幕は30字×2行に収まる長さ（display は60字以内が目安、72字まで）。最後の行は「{brand.closing_line}」。
 
 冒頭（opener）の型。何も知らない人が「見てみよう」と思う入り方にする:
 - 本題の名前も、論文も、数字も、専門用語も出さない。listener の身近な体験から始める。
@@ -300,7 +300,7 @@ def _parse(payload: dict[str, Any]) -> Script:
 
 # The listener's share of lines. The reference channel runs 25-35%; below the
 # floor it is a monologue, above the ceiling it is a sitcom.
-LISTENER_SHARE = (0.15, 0.45)
+LISTENER_SHARE = (0.15, 0.50)
 # Lines in a row that leave the stage untouched before it counts as static.
 # The room chapters are conversation; the reference holds its room for
 # thirty seconds at a time there and nowhere else.
@@ -309,7 +309,7 @@ MAX_HOLD_RUN_ROOM = 5
 ROOM_CHAPTERS = {"opener", "close"}
 # A subtitle is two rows of SUBTITLE_WRAP characters. Longer lines overflow
 # the band, and a line that long is a paragraph anyway.
-MAX_DISPLAY_CHARS = 60
+MAX_DISPLAY_CHARS = 72
 
 
 def check_visuals(script: Script) -> list[str]:
@@ -395,7 +395,7 @@ def validate(script: Script, known_refs: set[str], target_chars: int,
     too_long = [f"{c.key}:{i + 1}({len(line.display)}字)" for c in script.chapters
                 for i, line in enumerate(c.lines) if len(line.display) > MAX_DISPLAY_CHARS]
     if too_long:
-        problems.append(f"{len(too_long)} 行の display が{MAX_DISPLAY_CHARS}字を超えている（字幕2行に収まらない）: "
+        problems.append(f"{len(too_long)} 行の display が{MAX_DISPLAY_CHARS}字を超えている（字幕に収まらない。2文に分けること）: "
                         + ", ".join(too_long[:5]))
 
     unreadable: list[str] = []

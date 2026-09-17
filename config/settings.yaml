@@ -52,7 +52,7 @@ video:
   # AMD + Linux は VAAPI が本来の解だが、フィルタグラフ全体に hwupload を
   # 入れる必要があるため未対応。libx264 のままになる。
   encoder: auto
-  target_minutes: 18
+  target_minutes: 15   # 台本1行が約33字なので、18分だと出力トークン上限に近づく。15分で約180行
   width: 1920
   height: 1080
   fps: 30

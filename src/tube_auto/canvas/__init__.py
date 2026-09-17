@@ -121,10 +121,26 @@ class State:
                 return item
         raise CanvasError(f"no item named {name!r} on the stage (items: {[i.name for i in self.items][-8:]})")
 
+    def part_owner(self, part: str) -> tuple[Item, Box] | None:
+        """A bare part name ("row1", "nucleus"): the one item that has it."""
+        owners = [(item, item.parts[part]) for item in self.items if part in item.parts and part != "self"]
+        if len(owners) == 1:
+            return owners[0]
+        return None
+
     def box_of(self, ref: str) -> Box:
-        """A slot name, an item name, or item.part."""
+        """A slot name, an item name, item.part, a bare part name, or the
+        title / heading."""
         if ref in SLOTS:
             return SLOTS[ref]
+        if ref == "title" and self.title and not any(i.name == "title" for i in self.items):
+            cx, cy = (S.STAGE_LEFT + S.STAGE_RIGHT) / 2, (S.STAGE_TOP + S.STAGE_BOTTOM) / 2
+            w = max(len(line) for line in self.title.split("\n")) * S.SIZE_TITLE
+            return (cx - w / 2, cy - S.SIZE_TITLE, cx + w / 2, cy + S.SIZE_TITLE)
+        if ref == "heading" and self.heading and not any(i.name == "heading" for i in self.items):
+            cx = (S.STAGE_LEFT + S.STAGE_RIGHT) / 2
+            w = len(self.heading) * S.SIZE_HEADING
+            return (cx - w / 2, S.HEADING_Y - S.SIZE_HEADING / 2, cx + w / 2, S.HEADING_Y + S.SIZE_HEADING / 2)
         if "." in ref:
             item_name, part = ref.split(".", 1)
             item = self.find(item_name)
@@ -135,7 +151,13 @@ class State:
                 return edge
             raise CanvasError(f"{item_name!r} has no part {part!r} (has: {sorted(item.parts)}, "
                               "plus top/bottom/left/right/centre on anything)")
-        return self.find(ref).box
+        try:
+            return self.find(ref).box
+        except CanvasError:
+            owner = self.part_owner(ref)
+            if owner is None:
+                raise
+            return owner[1]
 
 
 OPS = (
@@ -182,6 +204,11 @@ class Canvas:
         if item.kind == "element":
             scratch = Image.new("RGB", (S.WIDTH, S.HEIGHT))
             item.parts = self._draw_element(scratch, ImageDraw.Draw(scratch), item)
+            # the element's own extent, not the slot it was offered: a label
+            # "below" a boxed word goes under the box, not under the slot
+            own = item.parts.get("self")
+            if own and own[2] - own[0] > 1 and own[3] - own[1] > 1:
+                item.box = tuple(own)
         self.state.items.append(item)
 
     def _name(self, op: dict[str, Any], prefix: str) -> str:
@@ -418,10 +445,12 @@ class Canvas:
         thirds = ("left-third", "mid-third", "right-third") if len(elements) == 3 else ("left", "right")
         for element, label, slot in zip(elements, labels, thirds):
             box = SLOTS[slot]
-            props = {"element": element}
-            name = f"{op.get('name', 'cmp')}_{slot.split('-')[0]}"
+            drawable = element in E.REGISTRY or (self.assets is not None and self.assets.has(element))
+            # comparing two ideas rather than two things: a boxed word each
+            props = {"element": element} if drawable else {"element": "concept", "text": label or element}
+            name = element if not any(i.name == element for i in self.state.items) else f"{op.get('name', 'cmp')}_{slot.split('-')[0]}"
             self._register(Item(name, "element", box, props))
-            if label:
+            if label and drawable:
                 self.apply({"op": "label", "text": label, "at": name, "side": "above", "size": S.SIZE_LABEL_SMALL})
 
     def _op_tiles(self, op: dict[str, Any]) -> None:

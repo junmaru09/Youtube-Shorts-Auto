@@ -67,11 +67,26 @@ class CitationReport:
         return " / ".join(parts)
 
 
+# A number that is a decade ("1920年代") or explicitly rough ("100年近く",
+# "3倍ほど") is textbook context, not a figure a viewer would check.
+APPROXIMATE_AFTER = ("代", "近く", "ほど", "くらい", "ぐらい", "以来", "あまり", "前後")
+
+
+def _checkable_numbers(text: str) -> list[str]:
+    found = []
+    for match in NUMBER_PATTERN.finditer(text):
+        tail = text[match.end():match.end() + 2]
+        if any(tail.startswith(a) for a in APPROXIMATE_AFTER):
+            continue
+        found.append(match.group(0))
+    return found
+
+
 def carries_a_claim(text: str) -> bool:
     """Whether this line states a number that a viewer could check."""
     if any(hedge in text for hedge in HEDGES):
         return False
-    return bool(NUMBER_PATTERN.search(text))
+    return bool(_checkable_numbers(text))
 
 
 def check(chapters: list[dict], known_refs: set[str]) -> CitationReport:
@@ -92,7 +107,7 @@ def check(chapters: list[dict], known_refs: set[str]) -> CitationReport:
                 if ref not in known_refs:
                     report.unknown_refs.append(ref)
 
-            numbers = {m.group(0).replace(" ", "") for m in NUMBER_PATTERN.finditer(display)}
+            numbers = {n.replace(" ", "") for n in _checkable_numbers(display)}
             if carries_a_claim(display) and not refs:
                 echoed = numbers and numbers <= set().union(*recent_cited[-2:]) if recent_cited else False
                 if not echoed:
