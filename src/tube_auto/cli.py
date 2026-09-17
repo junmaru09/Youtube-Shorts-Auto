@@ -380,6 +380,25 @@ def cmd_skip(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_requeue(args: argparse.Namespace) -> int:
+    """Put an idea back at `researched`, so a script is written afresh.
+
+    For an idea whose research is fine but whose script predates the
+    whiteboard: research is the expensive part, and a topic the model keeps
+    wanting to pick again is a topic worth keeping.
+    """
+    with db.session() as conn:
+        row = db.get_idea(conn, args.idea)
+        if row is None:
+            print(f"no idea {args.idea}", file=sys.stderr)
+            return 1
+        db.set_idea_status(conn, args.idea, "researched")
+        db.reset_attempts(conn, args.idea)
+        conn.commit()
+    print(f"idea {args.idea} ({row['hook'][:40]}) is back at 'researched'; run `tube-auto script --idea {args.idea}`")
+    return 0
+
+
 def cmd_gc(args: argparse.Namespace) -> int:
     """Delete work files no database row refers to."""
     with db.session() as conn:
@@ -506,6 +525,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("skip", help="mark an idea failed so no stage picks it up (e.g. a pre-whiteboard script)")
     p.add_argument("--idea", type=int, required=True)
     p.set_defaults(func=cmd_skip)
+
+    p = sub.add_parser("requeue", help="put an idea back at 'researched' so its script is rewritten")
+    p.add_argument("--idea", type=int, required=True)
+    p.set_defaults(func=cmd_requeue)
 
     p = sub.add_parser("gc", help="delete work files nothing refers to")
     p.add_argument("--dry-run", action="store_true")
