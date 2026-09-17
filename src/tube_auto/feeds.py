@@ -17,6 +17,7 @@ import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+import time
 from datetime import UTC, datetime, timedelta
 
 log = logging.getLogger(__name__)
@@ -32,7 +33,13 @@ NASA_FEEDS = {
     "nasa_science": "https://science.nasa.gov/feed/",
 }
 ARXIV_API = "http://export.arxiv.org/api/query"
+# Per-category daily announcements, on a different front end from the API.
+# The API has answered 406/500/503 and timed out for stretches of an hour
+# while this feed kept working; it is the fallback, thinner (one day's
+# papers) but reliable.
+ARXIV_RSS = "https://rss.arxiv.org/atom/{category}"
 ATOM = "{http://www.w3.org/2005/Atom}"
+DC = "{http://purl.org/dc/elements/1.1/}"
 
 
 @dataclass(slots=True)
@@ -57,10 +64,28 @@ class FeedItem:
         return (datetime.now(UTC) - when).total_seconds() / 86400
 
 
-def _fetch(url: str) -> bytes:
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
-        return response.read()
+# Retried statuses: the NASA feeds rate-limit (429) and arXiv's front end has
+# answered 406 to a perfectly ordinary request and 200 to the same one a
+# minute later. arXiv asks for three seconds between calls; that is the gap.
+RETRY_STATUSES = {406, 429, 500, 502, 503, 504}
+RETRY_GAP = 3.0
+
+
+def _fetch(url: str, attempts: int = 3) -> bytes:
+    request = urllib.request.Request(url, headers={
+        "User-Agent": USER_AGENT,
+        "Accept": "application/atom+xml, application/rss+xml, application/xml, text/xml, */*",
+    })
+    for attempt in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+                return response.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code not in RETRY_STATUSES or attempt == attempts:
+                raise
+            log.info("%s answered %d; retrying in %.0fs (%d/%d)", url.split("?")[0], exc.code, RETRY_GAP, attempt, attempts)
+            time.sleep(RETRY_GAP)
+    raise AssertionError("unreachable")
 
 
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -135,8 +160,8 @@ def fetch_arxiv(
     try:
         root = ET.fromstring(_fetch(url))
     except (urllib.error.URLError, ET.ParseError, OSError) as exc:
-        log.warning("arXiv query failed: %s", exc)
-        return []
+        log.warning("arXiv API failed (%s); falling back to the category feeds", exc)
+        return fetch_arxiv_feeds(categories, max_age_days=max_age_days, limit=limit)
 
     cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
     items: list[FeedItem] = []
@@ -170,6 +195,77 @@ def fetch_arxiv(
     return items
 
 
+def fetch_arxiv_feeds(categories: list[str], max_age_days: int = 30, limit: int = 40) -> list[FeedItem]:
+    """Today's announcements per category from rss.arxiv.org.
+
+    Replacements of old papers are skipped: a "replace" entry is a revision,
+    not news. New and cross-listed papers are kept.
+    """
+    cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
+    items: list[FeedItem] = []
+    seen: set[str] = set()
+    for category in categories:
+        try:
+            root = ET.fromstring(_fetch(ARXIV_RSS.format(category=category)))
+        except (urllib.error.URLError, ET.ParseError, OSError) as exc:
+            log.warning("arXiv feed %s unavailable: %s", category, exc)
+            continue
+        for entry in root.iter(f"{ATOM}entry"):
+            announce = (entry.findtext(f"{ATOM}announce_type") or "").strip()
+            if announce == "replace":
+                continue
+            link = ""
+            for l in entry.findall(f"{ATOM}link"):
+                if l.get("rel", "alternate") == "alternate":
+                    link = (l.get("href") or "").strip()
+            title = clean_text(entry.findtext(f"{ATOM}title") or "", 300)
+            if not link or not title or link in seen:
+                continue
+            seen.add(link)
+            summary = entry.findtext(f"{ATOM}summary") or ""
+            summary = summary.split("Abstract:", 1)[-1] if "Abstract:" in summary else summary
+            published = (entry.findtext(f"{ATOM}published") or "").strip()
+            try:
+                when = datetime.fromisoformat(published.replace("Z", "+00:00"))
+            except ValueError:
+                when = None
+            if when and when.astimezone(UTC) < cutoff:
+                continue
+            items.append(FeedItem(
+                kind="arxiv", url=link, title=title, summary=clean_text(summary),
+                published_at=when.astimezone(UTC).isoformat(timespec="seconds") if when else None,
+                authors=clean_text(entry.findtext(f"{DC}creator") or "", 200),
+            ))
+        time.sleep(1.0)
+    items.sort(key=lambda i: i.published_at or "", reverse=True)
+    return items[:limit]
+
+
+# Words in a theme's nasa_queries that say nothing about the subject. Every
+# NASA item mentions space; matching on it would match everything.
+_STOPWORDS = {"from", "with", "space", "nasa", "image", "images", "view", "views", "the", "and", "of"}
+
+
+def keyword_matcher(queries: list[str]):
+    """A predicate for "this item is about one of the theme's subjects".
+
+    Queries are written as search phrases — "hurricane from space", "ice
+    sheet Greenland" — and a phrase almost never appears verbatim in a news
+    summary, which starved every theme of news. A query now matches when
+    any of its meaningful words (four letters or more, not a stopword)
+    appears as a whole word.
+    """
+    words: set[str] = set()
+    for query in queries:
+        for word in re.findall(r"[a-z][a-z-]+", query.lower()):
+            if len(word) >= 4 and word not in _STOPWORDS:
+                words.add(word)
+    if not words:
+        return lambda text: True
+    pattern = re.compile(r"\b(" + "|".join(sorted(map(re.escape, words), key=len, reverse=True)) + r")\b", re.IGNORECASE)
+    return lambda text: bool(pattern.search(text))
+
+
 def gather(
     nasa_queries: list[str],
     arxiv_categories: list[str],
@@ -185,16 +281,12 @@ def gather(
     to a free public endpoint than six.
     """
     seen = exclude_urls or set()
-    keywords = [q.lower() for q in nasa_queries]
+    matcher = keyword_matcher(nasa_queries)
 
     news = [
         item
         for item in fetch_nasa_news(max_age_days=nasa_max_age_days)
-        if item.url not in seen
-        and (
-            not keywords
-            or any(k in f"{item.title} {item.summary}".lower() for k in keywords)
-        )
+        if item.url not in seen and matcher(f"{item.title} {item.summary}")
     ]
     papers = [
         item
