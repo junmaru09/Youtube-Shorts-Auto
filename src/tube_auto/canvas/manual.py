@@ -10,12 +10,15 @@ from __future__ import annotations
 
 from . import OPS, SLOTS
 from . import elements as E
+from . import illustrations as ILL
 from . import style as S
 
 VISUAL_MANUAL = f"""\
 ## 図の書き方（visual）
 
 画面は「1枚の板」です。1行のセリフにつき、板に対する操作を1〜3個書きます。
+**話に出てくる物は、その物の絵を置く**（物差しの話なら ruler、海なら wave_icon、家なら house）。
+言葉を箱に入れる concept は、絵にできない抽象語のときだけ。ラベルは絵に添える。
 板は消すまで残るので、図は行ごとに1手ずつ育てます（置く→矢印→ラベル→強調）。
 新しい話に移るときだけ clear します。章の最初の行は必ず clear から始めます。
 
@@ -59,7 +62,9 @@ VISUAL_MANUAL = f"""\
   - chain nodes=文:x:y[:色[:size]]|… edges=0-1|2-3        x,y は 0〜1。部位=各文
   - columns items=題:色:本文/改行|…                        部位=各題, 題.text
   - panel x=時間 y=高さ（空間） [warp=0.6]                  白い格子。部位=cell_c_r, origin
-- イラスト（assets にあるものだけ）: `place element=<ファイル名> slot=…`
+- **絵**（話に出てくる物は、言葉の箱ではなく絵を置く）: `<名前> slot=… name=… [size=small|large]`
+{ILL.manual_lines()}
+  例: 「物差し」の話なら `ruler slot=left name=r1`、「家」なら `house slot=right`。同じ絵を2つ置いて比べてもよい。
 
 ### 例（1行のセリフ＝1〜3操作）
 1. 「太陽の光が氷に当たると…」 → `sun slot=sky name=sun` / `earth_arc slot=floor name=earth` / `add element=ice_block near=earth name=ice1`

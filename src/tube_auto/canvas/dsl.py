@@ -20,6 +20,7 @@ from typing import Any
 
 from . import OPS
 from . import elements as E
+from . import illustrations as ILL
 
 __all__ = ["DSLError", "parse", "parse_many"]
 
@@ -144,8 +145,8 @@ def parse(line: str) -> dict[str, Any]:
 
     if op in OPS:
         return {"op": op, **args}
-    if op in E.REGISTRY:
-        # element name as shorthand for `place element=<name>`
+    if op in E.REGISTRY or op in ILL.ILLUSTRATIONS:
+        # element or illustration name as shorthand for `place element=<name>`
         return {"op": "place", "element": op, **args}
     raise DSLError(f"unknown operation {op!r} (ops: {', '.join(OPS)}; elements: {', '.join(sorted(E.REGISTRY))})")
 

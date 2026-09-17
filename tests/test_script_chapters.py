@@ -202,3 +202,29 @@ def test_model_habits_resolve():
               "concept slot=right text=密 name=dense", "label text=濃い at=dense below"]:
         c.apply(dsl.parse(l))
     assert c.state.items[-1].props["at"] == "dense"
+
+
+def test_illustrations_place_by_name_and_shadow_slot_names():
+    from tube_auto import paths
+    from tube_auto.canvas import AssetLibrary, Canvas, dsl
+
+    c = Canvas(assets=AssetLibrary(paths.ASSETS_DIR))
+    for l in ["background room", "ruler slot=left name=r1", "label text=物差し at=r1 side=below",
+              "sun_icon slot=top-right name=sky size=small", "label text=空 at=sky side=below"]:
+        c.apply(dsl.parse(l))
+    ruler = c.state.find("r1")
+    assert ruler.props["element"] == "ruler" and ruler.bounds[2] - ruler.bounds[0] <= 400
+    sky, label = c.state.find("sky"), c.state.items[-1]
+    assert label.box[1] > sky.bounds[3]                  # under the sun, not under the sky slot
+    assert abs((label.box[0] + label.box[2]) / 2 - (sky.bounds[0] + sky.bounds[2]) / 2) < 2
+
+
+def test_concept_does_not_count_as_a_placed_figure():
+    from tube_auto.canvas import Canvas
+    from tube_auto.models import Chapter, Line
+
+    lines = [Line("explainer", f"説明{i}のだ", "", visual=["concept slot=center text=言葉"]) for i in range(12)]
+    lines[0].visual = ["clear"] + lines[0].visual
+    chapter = Chapter(key="mechanism1", title="t", lines=lines)
+    problems = script_stage.check_chapter(chapter, {"key": "mechanism1", "lines": 12}, Canvas(), set())
+    assert any("要素を置く操作" in p for p in problems)

@@ -455,6 +455,36 @@ def notebook(width: int = S.WIDTH, height: int = S.HEIGHT, seed: int = 0) -> Ima
     return img
 
 
+def room(width: int = S.WIDTH, height: int = S.HEIGHT) -> Image.Image:
+    """A plain room for the small-talk chapters: wall, floor, a window with
+    daylight, a low table. Flat and outlined like everything else, so the
+    two characters have somewhere to be before the science starts."""
+    img = Image.new("RGB", (width, height), (238, 231, 214))
+    d = ImageDraw.Draw(img)
+    floor_y = int(height * 0.68)
+    d.rectangle((0, floor_y, width, height), fill=(205, 178, 140))
+    d.line((0, floor_y, width, floor_y), fill=S.INK, width=6)
+    # skirting
+    d.rectangle((0, floor_y - 26, width, floor_y), fill=(222, 210, 188))
+    # window, centre-left
+    wx0, wy0, wx1, wy1 = int(width * 0.30), int(height * 0.10), int(width * 0.70), int(height * 0.52)
+    d.rectangle((wx0 - 16, wy0 - 16, wx1 + 16, wy1 + 16), fill=(150, 110, 70), outline=S.INK, width=6)
+    d.rectangle((wx0, wy0, wx1, wy1), fill=(168, 214, 240))
+    # a little sky: sun and two clouds
+    d.ellipse((wx1 - 150, wy0 + 30, wx1 - 60, wy0 + 120), fill=(255, 220, 90))
+    for cx, cy, r in ((wx0 + 140, wy0 + 110, 40), (wx0 + 330, wy0 + 200, 50)):
+        for dx, dy, rr in ((0, 0, r), (r * 0.9, -r * 0.1, r * 0.8), (-r * 0.9, r * 0.1, r * 0.7)):
+            d.ellipse((cx + dx - rr, cy + dy - rr, cx + dx + rr, cy + dy + rr), fill=(255, 255, 255))
+    d.line(((wx0 + wx1) // 2, wy0, (wx0 + wx1) // 2, wy1), fill=(150, 110, 70), width=12)
+    d.line((wx0, (wy0 + wy1) // 2, wx1, (wy0 + wy1) // 2), fill=(150, 110, 70), width=12)
+    # low table
+    tx0, tx1, ty = int(width * 0.36), int(width * 0.64), int(height * 0.74)
+    d.rounded_rectangle((tx0, ty, tx1, ty + 34), radius=10, fill=(120, 80, 50), outline=S.INK, width=5)
+    for lx in (tx0 + 30, tx1 - 30):
+        d.rectangle((lx - 10, ty + 34, lx + 10, ty + 90), fill=(100, 66, 40), outline=S.INK, width=4)
+    return img
+
+
 def starfield(width: int = S.WIDTH, height: int = S.HEIGHT, seed: int = 0, stars: int = 900) -> Image.Image:
     """A dark sky with faint stars: the stand-in for a space photo until the
     asset library has one. Dark enough for white grid lines to read."""

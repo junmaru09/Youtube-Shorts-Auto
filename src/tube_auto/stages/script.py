@@ -217,6 +217,8 @@ def _system_prompt(brand: brand_mod.Brand, theme, target_chars: int) -> str:
 - 数字は1章に2つまで。数字より「どれくらい大きいか」の比喩を優先する。
 
 図の設計（最重要。視聴者はここで動画の質を判断します）:
+- **話に出てくる物は、その物の絵を置く**。物差しの話なら ruler、家なら house、海なら wave_icon。
+  言葉を箱に入れる concept は、絵にできない抽象語だけ。「物差し」という文字だけの図は不可。
 - **1行につき板を1手動かす**。同じ絵のまま3行以上話さない（hold の連続は2行まで）。
 - 図は積み上げる。置く→矢印→ラベル→強調、と行ごとに1手ずつ。1つの図に10行かけてよい。
 - 文字の箇条書き（list_add）に逃げない。関係は arrow、対比は columns/table、割合は pie、時間は timeline。
@@ -420,7 +422,7 @@ def check_visuals(script: Script) -> list[str]:
     chapter and line it sits on.
     """
     problems: list[str] = []
-    canvas = Canvas()
+    canvas = Canvas(assets=_library())
     hold_run = 0
     for ci, chapter in enumerate(script.chapters):
         max_hold = MAX_HOLD_RUN_ROOM if chapter.key in ROOM_CHAPTERS else MAX_HOLD_RUN
@@ -532,7 +534,8 @@ def check_chapter(chapter: Chapter, brief: dict[str, Any], canvas: Canvas, known
 
     if chapter.key not in ROOM_CHAPTERS and len(chapter.lines) >= 8:
         placed = sum(1 for line in chapter.lines for op in (line.ops or [])
-                     if op.get("op") in ("place", "add", "compare", "table", "chain", "columns", "panel", "zoom"))
+                     if (op.get("op") in ("add", "compare", "table", "chain", "columns", "panel", "zoom")
+                         or (op.get("op") == "place" and op.get("element") != "concept")))
         wanted_placed = max(2, len(chapter.lines) // 6)
         if placed < wanted_placed:
             problems.append(f"{chapter.key} で図（要素）を置く操作が{placed}回しかない（{len(chapter.lines)}行なら{wanted_placed}回以上。"
@@ -780,6 +783,13 @@ def write_preview(script: Script, idea_id: int) -> Path | None:
         return None
 
 
+def _library():
+    from .. import paths
+    from ..canvas import AssetLibrary
+
+    return AssetLibrary(paths.ASSETS_DIR)
+
+
 def _record_call(conn, response) -> None:
     if response.cost_usd:
         db.insert_llm_call(
@@ -800,7 +810,7 @@ def write_chapters(client, system: list[str], plan: list[dict[str, Any]], known_
     all, which fails the script. Returns the script (or None), the notes
     (degradations, or the fatal problem), and what it cost.
     """
-    canvas = Canvas()
+    canvas = Canvas(assets=_library())
     chapters: list[Chapter] = []
     hooks: list[str] = []
     notes: list[str] = []
@@ -939,7 +949,7 @@ def rewrite_chapter(idea_id: int, key: str, rounds: int | None = None) -> tuple[
         index = keys.index(key)
         system = [_system_prompt(brand, theme, target_chars), _sources_block(idea, sources)]
 
-        canvas = Canvas()
+        canvas = Canvas(assets=_library())
         for chapter in chapters[:index]:
             for line in chapter.lines:
                 for op in line.ops or []:

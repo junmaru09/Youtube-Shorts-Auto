@@ -53,6 +53,10 @@ PSDTool の `!` `*` 接頭辞は無視して照合する。
 
 ## illustrations/ — 図に置くイラスト
 
+同梱の101点は Noto Emoji（Apache-2.0）から `tools/fetch_illustrations.py` で512pxに書き出したもの。
+名前と日本語の対応は `src/tube_auto/canvas/illustrations.py`。足したいときはそこに1行足して再実行。
+台本からは `ruler slot=left name=r1` のように名前で置ける（`size=small|large|huge`）。
+
 `place element=<ファイル名（拡張子なし）> slot=…` で台本から参照できる。いらすとや等のフリー素材を想定。
 
 - いらすとやは **1作品につき20点まで無料**。21点以上は有償になるので、1動画で使う数は台本検証で止める（`assets.max_per_video`）。

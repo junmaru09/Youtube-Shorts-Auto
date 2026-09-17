@@ -69,6 +69,9 @@ def _slots() -> dict[str, Box]:
 
 SLOTS = _slots()
 
+# How big an illustration is drawn, by the `size` a script gives it.
+ILLUSTRATION_SIZES = {"small": 240, "normal": 400, "large": 560, "huge": 700}
+
 # Label sizes by name, for scripts that say `size=large`.
 NAMED_SIZES = {"small": S.SIZE_LABEL_SMALL, "normal": S.SIZE_LABEL, "medium": S.SIZE_LABEL,
                "large": 66, "big": 66, "huge": S.SIZE_TITLE, "title": S.SIZE_TITLE}
@@ -136,9 +139,10 @@ class State:
         return None
 
     def box_of(self, ref: str) -> Box:
-        """A slot name, an item name, item.part, a bare part name, or the
-        title / heading."""
-        if ref in SLOTS:
+        """An item name, item.part, a bare part name, the title / heading,
+        or a slot name — items first, because a script that names its sun
+        "sky" means the sun."""
+        if ref in SLOTS and not any(i.name == ref for i in self.items):
             return SLOTS[ref]
         if ref == "title" and self.title and not any(i.name == "title" for i in self.items):
             cx, cy = (S.STAGE_LEFT + S.STAGE_RIGHT) / 2, (S.STAGE_TOP + S.STAGE_BOTTOM) / 2
@@ -348,11 +352,12 @@ class Canvas:
         side = op.get("side", "auto")
         if side == "auto":
             side = "below" if ty0 < S.STAGE_TOP + S.STAGE_H * 0.25 else "above"
-        pointer = bool(op.get("pointer", False)) and at not in SLOTS
+        is_slot = at in SLOTS and not any(i.name == at for i in self.state.items)
+        pointer = bool(op.get("pointer", False)) and not is_slot
         gap = 110 if pointer else 36          # room for the little arrow
 
         def at_side(which: str) -> Box:
-            if at in SLOTS or which == "on":
+            if is_slot or which == "on":
                 cx, cy = (tx0 + tx1) / 2, (ty0 + ty1) / 2
             elif which == "above":
                 cx, cy = (tx0 + tx1) / 2, ty0 - th / 2 - gap
@@ -366,7 +371,7 @@ class Canvas:
 
         # stay off everything except the thing this label is attached to
         target_item = None
-        if at not in SLOTS:
+        if not is_slot:
             try:
                 target_item = self.state.find(at.split(".", 1)[0])
             except CanvasError:
@@ -380,7 +385,7 @@ class Canvas:
         # "below" something that sits on the band goes above it instead of
         # across the stage
         box = at_side(side)
-        if at not in SLOTS and side != "on" and (not _inside_stage(box) or any(_overlaps(box, o) for o in avoid)):
+        if not is_slot and side != "on" and (not _inside_stage(box) or any(_overlaps(box, o) for o in avoid)):
             opposite = {"above": "below", "below": "above", "left": "right", "right": "left"}
             for which in (opposite.get(side, "above"), *[s for s in ("above", "below", "right", "left") if s not in (side, opposite.get(side))]):
                 candidate = at_side(which)
@@ -409,8 +414,8 @@ class Canvas:
             if item.kind == "label":
                 boxes.append(item.box)
             elif item.kind == "element":
-                if item.props.get("element") in self.TEXT_ELEMENTS:
-                    boxes.append(item.bounds)
+                if item.props.get("element") in self.TEXT_ELEMENTS or item.props.get("element") not in E.REGISTRY:
+                    boxes.append(item.bounds)        # text, or an illustration
                 for name, part in item.parts.items():
                     if name != "self" and part[3] - part[1] <= 140 and part[2] - part[0] >= 20:
                         boxes.append(part)
@@ -492,7 +497,7 @@ class Canvas:
         """An arrow endpoint. Slots count as their centre point, not their
         box, or an arrow "to top-right" would stop the moment it left the
         source."""
-        if ref in SLOTS:
+        if ref in SLOTS and not any(i.name == ref for i in self.state.items):
             x0, y0, x1, y1 = SLOTS[ref]
             cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
             return (cx, cy, cx, cy)
@@ -598,6 +603,8 @@ class Canvas:
                 img = D.dimmed_photo(Image.open(photo))
             elif st.background == "space" and not (self.assets and self.assets.background("space")):
                 img = D.starfield(seed=self.seed)
+            elif st.background == "room" and not (self.assets and self.assets.background("room")):
+                img = D.room()
             elif st.background in ("parchment", "paper", "notebook") or not self.assets or not self.assets.background(st.background):
                 img = D.notebook(seed=self.seed) if S.THEME == "notebook" else D.parchment(seed=self.seed)
             else:
@@ -690,7 +697,15 @@ class Canvas:
         if self.assets and self.assets.has(name):
             sprite = self.assets.image(name)
             box = E._fit(item.box, sprite.width / sprite.height)
-            resized = sprite.resize((round(box[2] - box[0]), round(box[3] - box[1])), Image.LANCZOS)
+            # an illustration is a thing on the page, not a poster: cap it
+            cap = ILLUSTRATION_SIZES.get(str(props.get("size", "normal")), ILLUSTRATION_SIZES["normal"])
+            w, h = box[2] - box[0], box[3] - box[1]
+            if max(w, h) > cap:
+                scale = cap / max(w, h)
+                cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+                w, h = w * scale, h * scale
+                box = (cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2)
+            resized = sprite.resize((max(1, round(box[2] - box[0])), max(1, round(box[3] - box[1]))), Image.LANCZOS)
             img.paste(resized, (round(box[0]), round(box[1])), resized if resized.mode == "RGBA" else None)
             return {"self": box}
         raise CanvasError(f"cannot draw {name!r}")
