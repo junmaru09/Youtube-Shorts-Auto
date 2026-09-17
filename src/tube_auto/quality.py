@@ -21,6 +21,8 @@ from .canvas import wrap_subtitle
 DEFAULTS = {
     "min_changes_per_minute": 4.0,
     "max_static_seconds": 40.0,
+    "max_static_seconds_opening": 75.0,   # the room chapter: the reference sits 30-60 s there
+    "opening_seconds": 100.0,
     "max_three_row_subtitles": 0.05,     # share of lines wrapping to three rows
     "max_dropped_visuals": 6,
     "min_minutes": 8.0,
@@ -90,8 +92,9 @@ def score(timeline: list[dict[str, Any]], dropped_visuals: int = 0,
         problems.append(f"短すぎる: {minutes:.1f} 分（{t['min_minutes']:.0f} 分以上）")
     if per_minute < t["min_changes_per_minute"]:
         problems.append(f"図が動かなすぎる: {per_minute:.1f} 回/分（{t['min_changes_per_minute']:.0f} 回/分以上）")
-    if longest > t["max_static_seconds"]:
-        problems.append(f"{longest_at / 60:.1f} 分あたりで {longest:.0f} 秒静止（{t['max_static_seconds']:.0f} 秒まで）")
+    limit = t["max_static_seconds_opening"] if longest_at < t["opening_seconds"] else t["max_static_seconds"]
+    if longest > limit:
+        problems.append(f"{longest_at / 60:.1f} 分あたりで {longest:.0f} 秒静止（{limit:.0f} 秒まで）")
     if three_share > t["max_three_row_subtitles"]:
         problems.append(f"字幕が3行になる行が {three_share:.0%}（{t['max_three_row_subtitles']:.0%} まで）")
     if dropped_visuals > t["max_dropped_visuals"]:

@@ -530,6 +530,14 @@ def check_chapter(chapter: Chapter, brief: dict[str, Any], canvas: Canvas, known
     if report.unknown_refs:
         problems.append(f"存在しない出典ID: {sorted(set(report.unknown_refs))}")
 
+    if chapter.key not in ROOM_CHAPTERS and len(chapter.lines) >= 8:
+        placed = sum(1 for line in chapter.lines for op in (line.ops or [])
+                     if op.get("op") in ("place", "add", "compare", "table", "chain", "columns", "panel", "zoom"))
+        wanted_placed = max(2, len(chapter.lines) // 6)
+        if placed < wanted_placed:
+            problems.append(f"{chapter.key} で図（要素）を置く操作が{placed}回しかない（{len(chapter.lines)}行なら{wanted_placed}回以上。"
+                            "ラベルと矢印だけで済ませず、要素を置いて育てること）")
+
     wanted_figures = REQUIRED_FIGURES.get(chapter.key)
     if wanted_figures:
         used = {op.get("op") for line in chapter.lines for op in (line.ops or [])}

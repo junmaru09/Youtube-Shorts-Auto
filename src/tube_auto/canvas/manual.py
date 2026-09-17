@@ -33,7 +33,7 @@ VISUAL_MANUAL = f"""\
 - `heading text=… [colour=yellow align=left]` 上部見出し（人名・節名）
 - `title text=… [dim=true]` 中央に大きな題。dim=true で図を暗くして上に出す
 - `label text=… at=<スロット|要素名|要素名.部位> [side=above|below|left|right|on] [colour=] [size=] [pointer=true] [name=]`
-  pointer=true で対象へ小さな矢印を出す。text は12文字以内。
+  pointer=true で対象へ小さな矢印を出す。text は12文字以内。強調したい語は size=large、結論は title。
 - `arrow from=<参照> to=<参照|up|down|left|right|up-right|…> [via=<参照>] [length=] [colour=] [heads=2] [dashed=true] [bulge=]`
   参照はスロット名・要素名・`要素名.部位`。via で折れ曲がる（太陽→氷→反射）
 - `add element=<要素> near=<要素名> name=…` 既存の要素の隣・上に追加（ice_block は地面の上、moon は軌道）

@@ -450,7 +450,7 @@ def chain(d: ImageDraw.ImageDraw, box: Box, nodes: list[dict[str, Any]],
     boxes: list[Box] = []
     for n in nodes:
         cx, cy = x0 + n["x"] * w, y0 + n["y"] * h
-        size = n.get("size", S.SIZE_LABEL_SMALL)
+        size = n.get("size", S.SIZE_LABEL)
         lines = n["text"].split("\n")
         tw = max(text_size(line, size)[0] for line in lines)
         th = size * 1.25 * len(lines)
@@ -589,7 +589,7 @@ def wave(d: ImageDraw.ImageDraw, box: Box, cycles: float = 4.0, colour: str = "c
     shows a redshifted photon next to a normal one."""
     x0, y0, x1, y1 = box
     cy = (y0 + y1) / 2
-    amp = min((y1 - y0) / 2 - 8, 60)
+    amp = min((y1 - y0) / 2 - 8, 90)
     n = max(1.0, cycles / max(stretch, 0.1))
     pts = []
     steps = 160
@@ -746,7 +746,8 @@ def concept(d: ImageDraw.ImageDraw, box: Box, text: str = "", **_: Any) -> Parts
     ("測り方A" / "測り方B"). Same look as box_row's boxes."""
     x0, y0, x1, y1 = box
     lines = str(text).split("\n") if text else [""]
-    size = S.SIZE_LABEL
+    # alone in a big slot, a boxed word is the figure: make it read as one
+    size = S.SIZE_CONCEPT_BIG if (x1 - x0) >= S.STAGE_W * 0.6 else S.SIZE_LABEL
     tw = max(text_size(line, size)[0] for line in lines)
     th = size * 1.3 * len(lines)
     cx, cy = (x0 + x1) / 2, (y0 + y1) / 2

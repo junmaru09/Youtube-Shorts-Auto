@@ -93,15 +93,16 @@ FONT_BOLD = _FONT_DIR / "Mplus2-ExtraBold.otf"   # descriptions, table cells
 FONT_FALLBACK = Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc")
 
 SIZE_TITLE = 84
-SIZE_HEADING = 56
-SIZE_LABEL = 50
-SIZE_LABEL_SMALL = 40
+SIZE_HEADING = 58
+SIZE_LABEL = 54
+SIZE_LABEL_SMALL = 44
+SIZE_CONCEPT_BIG = 68              # a lone boxed word in the centre slot
 SIZE_NOTE = 32                     # the white description under a pie label
 SIZE_LIST = 40
 SIZE_SUBTITLE = 46
 SIZE_SUBTITLE_SMALL = 38           # when a line needs three rows
 SUBTITLE_WRAP = 30                 # characters per subtitle row; 30 × 46px fits between the sprites
-SIZE_TABLE = 48                    # table rows are as big as labels
+SIZE_TABLE = 50                    # table rows are as big as labels
 TABLE_ROW = 135                    # row pitch, measured
 
 # Inline marks drawn as shapes inside text (see draw._runs): the ◎ ring is
@@ -117,6 +118,9 @@ ARROW_HEAD = 56
 ARROW_OUTLINE = 4
 BOX_RADIUS = 10
 DIM_ALPHA = 130                    # the "title with dim" overlay
+APPEAR_HALO = (255, 220, 80, 110)  # behind what a line just added, for its first moments
+APPEAR_SECONDS = 0.45
+CROSSFADE_SECONDS = 0.3            # between a chapter's last frame and the next chapter's first
 HIGHLIGHT_WIDTH = 9
 
 # --- theme -----------------------------------------------------------------------

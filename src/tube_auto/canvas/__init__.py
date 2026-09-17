@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 from . import draw as D
 from . import elements as E
@@ -606,11 +606,26 @@ class Canvas:
             self._bg_cache[key] = img
         return self._bg_cache[key].copy()
 
-    def render_stage(self) -> Image.Image:
-        """Everything except sprites and subtitles."""
+    def render_stage(self, halo: list[Item] | None = None) -> Image.Image:
+        """Everything except sprites and subtitles. `halo` names items to
+        draw a soft yellow glow behind — what this line just added."""
         img = self.background()
-        d = ImageDraw.Draw(img)
         st = self.state
+        if halo:
+            glow = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            gd = ImageDraw.Draw(glow)
+            for item in halo:
+                if item.kind in ("dim",):
+                    continue
+                x0, y0, x1, y1 = item.bounds
+                pad = 22
+                # a glowing edge, not a filled block: a big figure would
+                # otherwise sit in a brown slab for half a second
+                gd.rounded_rectangle((x0 - pad, y0 - pad, x1 + pad, y1 + pad), radius=30,
+                                     outline=S.APPEAR_HALO[:3] + (200,), width=18)
+            glow = glow.filter(ImageFilter.GaussianBlur(16))
+            img = Image.alpha_composite(img.convert("RGBA"), glow).convert("RGB")
+        d = ImageDraw.Draw(img)
 
         for item in st.items:
             if item.kind == "element":

@@ -26,6 +26,7 @@ from PIL import Image
 from .. import brand as brand_mod
 from .. import paths
 from ..canvas import AssetLibrary, Canvas, CanvasError, SpriteSet
+from ..canvas import style as S
 
 log = logging.getLogger(__name__)
 
@@ -115,23 +116,45 @@ def render_frames(
             canvas.chapter_photo = photo
 
         canvas.apply({"op": "expression", speaker: entry.get("expression", "normal") or "normal"})
-        for op in entry.get("ops") or [{"op": "hold"}]:
+        before = {id(item) for item in canvas.state.items}
+        ops = entry.get("ops") or [{"op": "hold"}]
+        cleared = any(op.get("op") in ("clear", "background") for op in ops)
+        for op in ops:
             try:
                 canvas.apply(op)
             except CanvasError as exc:
                 # validated at script time; a stale asset can still break here
                 result.problems.append(f"line {index}: {exc}")
                 break
+        added = [item for item in canvas.state.items if id(item) not in before and item.kind != "dim"]
 
-        stage = canvas.render_stage()
-        frames = {}
-        for mouth in ("closed", "open"):
+        def compose(stage: Image.Image, mouth: str, tag: str) -> Path:
             img = stage.copy()
             canvas.finish(img, entry.get("display", ""), speaker, sprites, mouth_open=(mouth == "open"))
-            path = workdir / f"f{index:04d}_{mouth}.png"
+            path = workdir / f"f{index:04d}_{tag}{mouth}.png"
             img.save(path, compress_level=1)
-            frames[mouth] = path
             result.frames += 1
+            return path
+
+        stage = canvas.render_stage()
+        frames = {mouth: compose(stage, mouth, "") for mouth in ("closed", "open")}
+        # the moments right after something appears: a glow behind it
+        glow_frames = None
+        if added:
+            glow_stage = canvas.render_stage(halo=added)
+            glow_frames = {mouth: compose(glow_stage, mouth, "new_") for mouth in ("closed", "open")}
+
+        # a chapter's first line: dissolve from the last frame instead of cutting
+        if cleared and last_frame is not None:
+            previous = Image.open(last_frame).convert("RGB")
+            target = Image.open(frames["closed"]).convert("RGB")
+            steps = 3
+            for k in range(1, steps + 1):
+                blend = Image.blend(previous, target, k / (steps + 1))
+                path = workdir / f"f{index:04d}_x{k}.png"
+                blend.save(path, compress_level=1)
+                result.frames += 1
+                rows.append(f"file '{path.resolve()}'\nduration {S.CROSSFADE_SECONDS / steps:.3f}")
 
         # alternate open/closed while the audio is loud
         seconds = max(0.05, end - start)
@@ -148,7 +171,8 @@ def render_frames(
                 mouth = "open" if (level > SPEECH_THRESHOLD and not flip) else "closed"
                 if level > SPEECH_THRESHOLD:
                     flip = not flip
-                rows.append(f"file '{frames[mouth].resolve()}'\nduration {dur:.3f}")
+                pick = glow_frames if (glow_frames and t < S.APPEAR_SECONDS) else frames
+                rows.append(f"file '{pick[mouth].resolve()}'\nduration {dur:.3f}")
                 t += dur
             if t < seconds - 1e-3:
                 rows.append(f"file '{frames['closed'].resolve()}'\nduration {seconds - t:.3f}")
