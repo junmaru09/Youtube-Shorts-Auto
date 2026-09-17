@@ -61,7 +61,7 @@ def test_the_forms_the_model_actually_writes_parse():
 def test_every_item_has_edge_parts():
     c = Canvas()
     c.apply(dsl.parse("galaxy slot=center name=g1"))
-    x0, y0, x1, y1 = c.state.find("g1").box
+    x0, y0, x1, y1 = c.state.find("g1").bounds      # the drawn extent, not the slot
     top = c.state.box_of("g1.top")
     assert abs((top[0] + top[2]) / 2 - (x0 + x1) / 2) < 1 and abs(top[1] + 8 - y0) < 1
     with pytest.raises(CanvasError):

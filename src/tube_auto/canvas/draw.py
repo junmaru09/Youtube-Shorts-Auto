@@ -386,9 +386,17 @@ def strike(draw: ImageDraw.ImageDraw, box: tuple[float, float, float, float],
 
 def highlight(draw: ImageDraw.ImageDraw, box: tuple[float, float, float, float],
               colour: RGB = S.YELLOW, width: int = S.HIGHLIGHT_WIDTH, pad: int = 22) -> None:
-    """A yellow ellipse around a box — "look here"."""
+    """A yellow ring around a box — "look here". An ellipse round a wide
+    box swells to twice its width, so wide targets get a rounded frame."""
     x0, y0, x1, y1 = box
-    draw.ellipse((x0 - pad, y0 - pad, x1 + pad, y1 + pad), outline=colour, width=width)
+    w, h = x1 - x0, y1 - y0
+    if w > 2.2 * h or h > 2.2 * w:
+        draw.rounded_rectangle((x0 - pad, y0 - pad, x1 + pad, y1 + pad), radius=int(pad * 1.5),
+                               outline=colour, width=width)
+    else:
+        # an ellipse that just contains the box: axes grown by √2
+        gx, gy = w * 0.2071 + pad, h * 0.2071 + pad
+        draw.ellipse((x0 - gx, y0 - gy, x1 + gx, y1 + gy), outline=colour, width=width)
 
 
 def dim(image: Image.Image, alpha: int = S.DIM_ALPHA,

@@ -32,7 +32,11 @@ SPRITE_TOP = 600
 SPRITE_CUT = 24                   # px of chin allowed over the band
 SPRITE_LEFT = (20, SPRITE_TOP)
 SPRITE_RIGHT = (WIDTH - SPRITE_WIDTH - 20, SPRITE_TOP)
-SPRITE_FLIP = {"listener"}        # mirrored, so the pair face each other
+# Which side each role stands on, and who is mirrored. Both 立ち絵 face the
+# viewer's right; with ずんだもん on the right and めたん mirrored on the
+# left they look at each other across the stage.
+SPRITE_SIDE = {"explainer": "right", "listener": "left"}
+SPRITE_FLIP = {"listener"}
 
 # The stage: where figures go. Above the sprites' heads it is nearly the
 # full frame width (the reference puts tables and box rows at x=120); level

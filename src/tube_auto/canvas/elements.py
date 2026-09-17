@@ -475,6 +475,10 @@ def chain(d: ImageDraw.ImageDraw, box: Box, nodes: list[dict[str, Any]],
             start = (pa[0], ay1 + 10) if dy > 0 else (pa[0], ay0 - 10)
             end = (pb[0], by0 - 10) if dy > 0 else (pb[0], by1 + 10)
         arrow(d, start, end, S.WHITE)
+    if boxes:
+        # the chain's own extent is its nodes, not the slot it was offered
+        parts["self"] = (min(b[0] for b in boxes), min(b[1] for b in boxes),
+                         max(b[2] for b in boxes), max(b[3] for b in boxes))
     return parts
 
 
@@ -569,6 +573,9 @@ def columns(d: ImageDraw.ImageDraw, box: Box, items: list[dict[str, Any]], **_: 
                 outlined_text(d, (cx, top + j * step), line, S.SIZE_LABEL_SMALL - 2, S.WHITE)
             bw = max(text_size(line, S.SIZE_LABEL_SMALL - 2)[0] for line in lines)
             parts[f"{item['title']}.text"] = (cx - bw / 2, top - step / 2, cx + bw / 2, top + (len(lines) - 0.5) * step)
+    inner = [b for k, b in parts.items() if k != "self"]
+    if inner:
+        parts["self"] = (min(b[0] for b in inner), min(b[1] for b in inner), max(b[2] for b in inner), max(b[3] for b in inner))
     return parts
 
 

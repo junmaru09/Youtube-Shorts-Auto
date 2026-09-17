@@ -94,9 +94,14 @@ ATTACH = {
 class Item:
     name: str
     kind: str                 # "element" | "label" | "arrow" | "highlight" | "strike" | "compare"
-    box: Box
+    box: Box                  # where it is drawn (a slot, for elements)
     props: dict[str, Any] = field(default_factory=dict)
     parts: dict[str, Box] = field(default_factory=dict)
+    extent: Box | None = None # what it actually covers, for references and collisions
+
+    @property
+    def bounds(self) -> Box:
+        return self.extent or self.box
 
 
 @dataclass
@@ -137,8 +142,10 @@ class State:
             return SLOTS[ref]
         if ref == "title" and self.title and not any(i.name == "title" for i in self.items):
             cx, cy = (S.STAGE_LEFT + S.STAGE_RIGHT) / 2, (S.STAGE_TOP + S.STAGE_BOTTOM) / 2
-            w = max(len(line) for line in self.title.split("\n")) * S.SIZE_TITLE
-            return (cx - w / 2, cy - S.SIZE_TITLE, cx + w / 2, cy + S.SIZE_TITLE)
+            lines = self.title.split("\n")
+            w = max(D.text_size(line, S.SIZE_TITLE)[0] for line in lines) + 16
+            h = S.SIZE_TITLE * 1.25 * len(lines)
+            return (cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2)
         if ref == "heading" and self.heading and not any(i.name == "heading" for i in self.items):
             cx = (S.STAGE_LEFT + S.STAGE_RIGHT) / 2
             w = len(self.heading) * S.SIZE_HEADING
@@ -148,13 +155,13 @@ class State:
             item = self.find(item_name)
             if part in item.parts:
                 return item.parts[part]
-            edge = _edge_part(item.box, part)
+            edge = _edge_part(item.bounds, part)
             if edge is not None:
                 return edge
             raise CanvasError(f"{item_name!r} has no part {part!r} (has: {sorted(item.parts)}, "
                               "plus top/bottom/left/right/centre on anything)")
         try:
-            return self.find(ref).box
+            return self.find(ref).bounds
         except CanvasError:
             owner = self.part_owner(ref)
             if owner is None:
@@ -207,10 +214,12 @@ class Canvas:
             scratch = Image.new("RGB", (S.WIDTH, S.HEIGHT))
             item.parts = self._draw_element(scratch, ImageDraw.Draw(scratch), item)
             # the element's own extent, not the slot it was offered: a label
-            # "below" a boxed word goes under the box, not under the slot
+            # "below" a boxed word goes under the box, not under the slot.
+            # The drawing box stays the slot, because chains and graphs lay
+            # themselves out inside it.
             own = item.parts.get("self")
             if own and own[2] - own[0] > 1 and own[3] - own[1] > 1:
-                item.box = tuple(own)
+                item.extent = tuple(own)
         self.state.items.append(item)
 
     def _name(self, op: dict[str, Any], prefix: str) -> str:
@@ -272,7 +281,10 @@ class Canvas:
         slot = op.get("slot", "center")
         box = self._box_from(op) if "box" in op else self.state.box_of(slot) if slot in SLOTS else self._box_from(op)
         props = {k: v for k, v in op.items() if k not in ("op", "element", "slot", "name", "box")}
-        self._register(Item(self._name(op, element), "element", box, {"element": element, **props}))
+        item = Item(self._name(op, element), "element", box, {"element": element, **props})
+        self._register(item)
+        if slot not in ("sky", "floor", "wide", "top") and "box" not in op:
+            self._nudge_element(item, box)
 
     def _box_from(self, op: dict[str, Any]) -> Box:
         if "box" in op:
@@ -289,7 +301,7 @@ class Canvas:
         near = self.state.find(op["near"])
         siblings = [i for i in self.state.items if i.props.get("element") == element and i.props.get("near") == near.name]
         rule = ATTACH.get(element, "beside")
-        nx0, ny0, nx1, ny1 = near.box
+        nx0, ny0, nx1, ny1 = near.bounds
         size = op.get("size", 260 if rule == "on_surface" else round((nx1 - nx0) * 0.32) if rule == "orbit" else 170)
 
         if rule == "on_surface" and "surface" in near.parts:
@@ -307,7 +319,7 @@ class Canvas:
             cx, cy = nx1 + size * 0.55, ny0 + size * 0.15
             box = (cx - size / 2, cy - size / 2, cx + size / 2, cy + size / 2)
         else:
-            nx0, ny0, nx1, ny1 = near.box
+            nx0, ny0, nx1, ny1 = near.bounds
             n = len(siblings)
             cx = nx1 + size * 0.75 + n * size * 1.2
             cy = (ny0 + ny1) / 2
@@ -337,22 +349,45 @@ class Canvas:
         if side == "auto":
             side = "below" if ty0 < S.STAGE_TOP + S.STAGE_H * 0.25 else "above"
         pointer = bool(op.get("pointer", False)) and at not in SLOTS
-        gap = 110 if pointer else 22          # room for the little arrow
-        if at in SLOTS:
-            cx, cy = (tx0 + tx1) / 2, (ty0 + ty1) / 2
-        elif side == "above":
-            cx, cy = (tx0 + tx1) / 2, ty0 - th / 2 - gap
-        elif side == "below":
-            cx, cy = (tx0 + tx1) / 2, ty1 + th / 2 + gap
-        elif side == "left":
-            cx, cy = tx0 - tw / 2 - gap, (ty0 + ty1) / 2
-        elif side == "right":
-            cx, cy = tx1 + tw / 2 + gap, (ty0 + ty1) / 2
-        else:  # "on"
-            cx, cy = (tx0 + tx1) / 2, (ty0 + ty1) / 2
-        box = (cx - tw / 2, cy - th / 2, cx + tw / 2, cy + th / 2)
+        gap = 110 if pointer else 36          # room for the little arrow
+
+        def at_side(which: str) -> Box:
+            if at in SLOTS or which == "on":
+                cx, cy = (tx0 + tx1) / 2, (ty0 + ty1) / 2
+            elif which == "above":
+                cx, cy = (tx0 + tx1) / 2, ty0 - th / 2 - gap
+            elif which == "below":
+                cx, cy = (tx0 + tx1) / 2, ty1 + th / 2 + gap
+            elif which == "left":
+                cx, cy = tx0 - tw / 2 - gap, (ty0 + ty1) / 2
+            else:
+                cx, cy = tx1 + tw / 2 + gap, (ty0 + ty1) / 2
+            return (cx - tw / 2, cy - th / 2, cx + tw / 2, cy + th / 2)
+
+        # stay off everything except the thing this label is attached to
+        target_item = None
         if at not in SLOTS:
-            box = self._nudge_label(box, side)
+            try:
+                target_item = self.state.find(at.split(".", 1)[0])
+            except CanvasError:
+                target_item = None
+        avoid = self._occupied(except_item=target_item if side == "on" else None)
+        if target_item is not None and side != "on":
+            # the target's own text parts stay avoided; its body does not
+            avoid = [b for b in avoid if b != target_item.bounds]
+
+        # the asked-for side, then the opposite, then the other two: a label
+        # "below" something that sits on the band goes above it instead of
+        # across the stage
+        box = at_side(side)
+        if at not in SLOTS and side != "on" and (not _inside_stage(box) or any(_overlaps(box, o) for o in avoid)):
+            opposite = {"above": "below", "below": "above", "left": "right", "right": "left"}
+            for which in (opposite.get(side, "above"), *[s for s in ("above", "below", "right", "left") if s not in (side, opposite.get(side))]):
+                candidate = at_side(which)
+                if _inside_stage(candidate) and not any(_overlaps(candidate, o) for o in avoid):
+                    box, side = candidate, which
+                    break
+        box = self._nudge_label(box, side, avoid)
         props: dict[str, Any] = {"text": text, "size": size, "colour": colour, "at": at}
         if pointer:
             # a short arrow from the label's edge to the target's edge
@@ -360,35 +395,98 @@ class Canvas:
             props["pointer"] = (p0, p1)
         self.state.items.append(Item(self._name(op, "label"), "label", box, props))
 
-    def _nudge_label(self, box: Box, side: str) -> Box:
-        """Move a label off any label already there.
+    # Elements that are mostly text: a label must not land on them. Figures
+    # (pie, timeline, earth) take labels on top by design.
+    TEXT_ELEMENTS = {"concept", "box_row", "table", "columns", "chain", "ladder"}
+
+    def _occupied(self, except_item: Item | None = None) -> list[Box]:
+        """Boxes a new label must stay off: every label, every text-sized
+        part of every element, and the whole of text-bearing elements."""
+        boxes: list[Box] = []
+        for item in self.state.items:
+            if item is except_item:
+                continue
+            if item.kind == "label":
+                boxes.append(item.box)
+            elif item.kind == "element":
+                if item.props.get("element") in self.TEXT_ELEMENTS:
+                    boxes.append(item.bounds)
+                for name, part in item.parts.items():
+                    if name != "self" and part[3] - part[1] <= 140 and part[2] - part[0] >= 20:
+                        boxes.append(part)
+        return boxes
+
+    def _nudge_label(self, box: Box, side: str, avoid: list[Box] | None = None) -> Box:
+        """Move a label off anything already there.
 
         Two bands labelled "氷期" and "間氷期" land on the same spot when both
         are put above the timeline; the reference sets them side by side.
-        Slide sideways first (the pointer still reaches), then stack.
+        Slide sideways first (the pointer still reaches), then stack, and
+        never leave the stage.
         """
-        def overlaps(a: Box, b: Box) -> bool:
-            return not (a[2] < b[0] - 8 or a[0] > b[2] + 8 or a[3] < b[1] - 4 or a[1] > b[3] + 4)
-
-        others = [i.box for i in self.state.items if i.kind == "label"]
-        for _ in range(6):
-            hit = next((o for o in others if overlaps(box, o)), None)
-            if hit is None:
+        others = self._occupied() if avoid is None else avoid
+        w, h = box[2] - box[0], box[3] - box[1]
+        if _inside_stage(box) and not any(_overlaps(box, o) for o in others):
+            return box
+        if not _inside_stage(box):
+            # off the stage (under the band, past an edge): pull it back first
+            box = (min(max(box[0], S.STAGE_FULL_LEFT), S.STAGE_FULL_RIGHT - w), min(max(box[1], 4), S.STAGE_BOTTOM - h),
+                   0, 0)
+            box = (box[0], box[1], box[0] + w, box[1] + h)
+            if not any(_overlaps(box, o) for o in others):
                 return box
-            w = box[2] - box[0]
-            if side in ("above", "below"):
-                # step away from the other label's centre, horizontally
-                direction = 1 if (box[0] + box[2]) >= (hit[0] + hit[2]) else -1
-                shift = (w + 24) * direction
-                if direction > 0:
-                    shift = hit[2] + 24 - box[0]
-                else:
-                    shift = hit[0] - 24 - box[2]
-                box = (box[0] + shift, box[1], box[2] + shift, box[3])
-            else:
-                h = box[3] - box[1]
-                box = (box[0], box[1] - h - 12, box[2], box[3] - h - 12)
+        pushed = _push_out(box, others)
+        if pushed is not None:
+            return pushed
+        # candidate moves, nearest first: sideways for above/below labels,
+        # up/down for left/right ones, then the other axis, then diagonals
+        steps = []
+        for k in (1, 2, 3):
+            dx, dy = (w + 28) * k, (h + 16) * k
+            primary = [(dx, 0), (-dx, 0)] if side in ("above", "below", "on", "auto") else [(0, -dy), (0, dy)]
+            secondary = [(0, -dy), (0, dy)] if side in ("above", "below", "on", "auto") else [(dx, 0), (-dx, 0)]
+            steps += primary + secondary
+        steps += [(dx, -dy), (-dx, -dy), (dx, dy), (-dx, dy)]
+        for dx, dy in steps:
+            moved = (box[0] + dx, box[1] + dy, box[2] + dx, box[3] + dy)
+            if not _inside_stage(moved):
+                continue
+            if not any(_overlaps(moved, o) for o in others):
+                return moved
         return box
+
+    def _nudge_element(self, item: Item, slot_box: Box) -> None:
+        """Shift a freshly placed element off any element already there.
+
+        Two concepts both put at "center" should end up side by side, not on
+        top of each other. The slot box is moved and the element redrawn.
+        """
+        others = [i for i in self.state.items if i.kind in ("element", "label") and i is not item]
+        mine = item.bounds
+        if not any(_overlaps(mine, o.bounds, 0) for o in others):
+            return
+        w, h = mine[2] - mine[0], mine[3] - mine[1]
+        candidates = []
+        pushed = _push_out(mine, [o.bounds for o in others], margin=16)
+        if pushed is not None:
+            candidates.append((pushed[0] - mine[0], pushed[1] - mine[1]))
+        for k in (1, 2):
+            candidates += [((w + 40) * k, 0), (-(w + 40) * k, 0), (0, (h + 40) * k), (0, -(h + 40) * k)]
+        for dx, dy in candidates:
+            moved_slot = (slot_box[0] + dx, slot_box[1] + dy, slot_box[2] + dx, slot_box[3] + dy)
+            item.box = moved_slot
+            scratch = Image.new("RGB", (S.WIDTH, S.HEIGHT))
+            parts = self._draw_element(scratch, ImageDraw.Draw(scratch), item)
+            own = parts.get("self", moved_slot)
+            if _inside_stage(own) and not any(_overlaps(own, o.bounds, 0) for o in others):
+                item.parts = parts
+                item.extent = tuple(own)
+                return
+        # nowhere free: back to where it was
+        item.box = slot_box
+        scratch = Image.new("RGB", (S.WIDTH, S.HEIGHT))
+        item.parts = self._draw_element(scratch, ImageDraw.Draw(scratch), item)
+        item.extent = tuple(item.parts.get("self", slot_box))
 
     def _target(self, ref: str) -> Box:
         """An arrow endpoint. Slots count as their centre point, not their
@@ -436,7 +534,7 @@ class Canvas:
 
     def _op_strike(self, op: dict[str, Any]) -> None:
         target = self.state.find(op["target"])
-        self.state.items.append(Item(self._name(op, "strike"), "strike", target.box, {"target": target.name}))
+        self.state.items.append(Item(self._name(op, "strike"), "strike", target.bounds, {"target": target.name}))
 
     def _op_highlight(self, op: dict[str, Any]) -> None:
         box = self.state.box_of(op["target"])
@@ -538,7 +636,7 @@ class Canvas:
                 D.dim(img, item.props["alpha"])
                 d = ImageDraw.Draw(img)
             elif item.kind == "strike":
-                D.strike(d, st.find(item.props["target"]).box)
+                D.strike(d, st.find(item.props["target"]).bounds)
             elif item.kind == "highlight":
                 D.highlight(d, st.box_of(item.props["target"]))
             elif item.kind == "tile":
@@ -634,6 +732,47 @@ class Canvas:
 # --- helpers ---------------------------------------------------------------------
 
 
+def _push_out(box: Box, others: list[Box], margin: float = 10, rounds: int = 8) -> Box | None:
+    """Move `box` by the smallest translation that clears every box in
+    `others`, a few rounds over. A five-pixel corner touch becomes a
+    fifteen-pixel slide, not a jump across the stage. None if it cannot."""
+    for _ in range(rounds):
+        hit = next((o for o in others if _overlaps(box, o, margin)), None)
+        if hit is None:
+            return box if _inside_stage(box) else None
+        # the four ways out, cheapest first (a pixel past the margin, so the
+        # strict overlap test below sees clear air)
+        m = margin + 2
+        moves = sorted([
+            (hit[2] + m - box[0], (hit[2] + m - box[0], 0)),      # right
+            (box[2] - hit[0] + m, (-(box[2] - hit[0] + m), 0)),   # left
+            (hit[3] + m - box[1], (0, hit[3] + m - box[1])),      # down
+            (box[3] - hit[1] + m, (0, -(box[3] - hit[1] + m))),   # up
+        ], key=lambda mv: mv[0])
+        for _, (dx, dy) in moves:
+            moved = (box[0] + dx, box[1] + dy, box[2] + dx, box[3] + dy)
+            if _inside_stage(moved):
+                box = moved
+                break
+        else:
+            return None
+    return box if not any(_overlaps(box, o, margin) for o in others) and _inside_stage(box) else None
+
+
+def _overlaps(a: Box, b: Box, margin: float = 8) -> bool:
+    return not (a[2] < b[0] - margin or a[0] > b[2] + margin or a[3] < b[1] - margin or a[1] > b[3] + margin)
+
+
+def _inside_stage(box: Box) -> bool:
+    """On the page, above the band, and not behind a character: the full
+    width is free above the sprites' heads, only the middle beside them."""
+    if box[1] < 0 or box[3] > S.STAGE_BOTTOM + 10:
+        return False
+    if box[3] > S.SPRITE_TOP - 20:
+        return box[0] >= S.STAGE_LEFT and box[2] <= S.STAGE_RIGHT
+    return box[0] >= S.STAGE_FULL_LEFT - 20 and box[2] <= S.STAGE_FULL_RIGHT + 20
+
+
 def _edge_part(box: Box, part: str) -> Box | None:
     """`.top` and friends on any item: a point on that edge, or the centre.
     Elements name their meaningful parts; these are the ones every box has."""
@@ -669,13 +808,10 @@ def _edge_points(a: Box, b: Box, pad: float = 14.0) -> tuple[tuple[float, float]
 def _placeholder_sprites(img: Image.Image, speaker: str, only: str | None = None) -> None:
     """Coloured circles until real sprite assets exist."""
     d = ImageDraw.Draw(img)
-    for who, xy, colour, label in (
-        ("explainer", S.SPRITE_LEFT, (120, 200, 120), "ずんだ"),
-        ("listener", S.SPRITE_RIGHT, (200, 140, 220), "めたん"),
-    ):
+    for who, colour, label in (("explainer", (120, 200, 120), "ずんだ"), ("listener", (200, 140, 220), "めたん")):
         if only and who != only:
             continue
-        x, y = xy
+        x, y = S.SPRITE_RIGHT if S.SPRITE_SIDE.get(who) == "right" else S.SPRITE_LEFT
         x += (S.SPRITE_WIDTH - S.SPRITE_SIZE) // 2
         shade = colour if who == speaker else tuple(int(c * 0.72) for c in colour)
         d.ellipse((x + 20, y + 20, x + S.SPRITE_SIZE - 20, y + S.SPRITE_SIZE - 20), fill=shade, outline=S.INK, width=S.OUTLINE_SHAPE)
@@ -794,7 +930,8 @@ class SpriteSet:
         return bool(folder) and self._load(folder, "normal", False) is not None
 
     def paste(self, img: Image.Image, expressions: dict[str, str], speaker: str | None, mouth_open: bool) -> None:
-        for role, xy in (("explainer", S.SPRITE_LEFT), ("listener", S.SPRITE_RIGHT)):
+        for role in ("explainer", "listener"):
+            xy = S.SPRITE_RIGHT if S.SPRITE_SIDE.get(role) == "right" else S.SPRITE_LEFT
             folder = self.characters.get(role)
             talking = role == speaker
             sprite = self._load(folder, expressions.get(role, "normal"), mouth_open and talking) if folder else None
