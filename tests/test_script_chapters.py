@@ -227,4 +227,4 @@ def test_concept_does_not_count_as_a_placed_figure():
     lines[0].visual = ["clear"] + lines[0].visual
     chapter = Chapter(key="mechanism1", title="t", lines=lines)
     problems = script_stage.check_chapter(chapter, {"key": "mechanism1", "lines": 12}, Canvas(), set())
-    assert any("要素を置く操作" in p for p in problems)
+    assert any("要素）を置く操作" in p for p in problems)
