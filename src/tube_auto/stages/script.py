@@ -19,6 +19,7 @@ choice rather than whatever the model wrote first.
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 from dataclasses import dataclass, field
@@ -26,6 +27,8 @@ from typing import Any
 
 from .. import brand as brand_mod
 from .. import citations, config, db, reading
+from pathlib import Path
+
 from ..canvas import Canvas, CanvasError, dsl
 from ..canvas.manual import VISUAL_MANUAL
 from ..llm import LLMClient
@@ -136,6 +139,36 @@ SCRIPT_TOOL = {
 }
 
 
+# One chapter at a time. The whole-script tool above is kept for tests and
+# for the dry-run path; generation itself goes chapter by chapter because a
+# 20,000-token script rejected for one bad line costs a full regeneration,
+# and a chapter rejected for one bad line costs a ninth of that.
+CHAPTER_TOOL = {
+    "name": "submit_chapter",
+    "description": "Submit one chapter of the script.",
+    "strict": True,
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "key": {"type": "string", "description": "章のkey（指定されたものをそのまま）"},
+            "title": {"type": "string", "description": "日本語の章タイトル。15文字以内。"},
+            "visual_intent": {
+                "type": "string",
+                "description": "この章の図の後ろに暗く敷く写真の英語検索語（例: 'milky way'）。要らなければ空文字。",
+            },
+            "hooks": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "opener の章だけ: 冒頭の最初の一言の3案（本題名を出さない）。他の章は空配列。",
+            },
+            "lines": SCRIPT_TOOL["input_schema"]["properties"]["chapters"]["items"]["properties"]["lines"],
+        },
+        "required": ["key", "title", "visual_intent", "hooks", "lines"],
+        "additionalProperties": False,
+    },
+}
+
+
 @dataclass(slots=True)
 class ScriptResult:
     written: int = 0
@@ -197,17 +230,20 @@ def _system_prompt(brand: brand_mod.Brand, theme, target_chars: int) -> str:
 
 {reading.SPOKEN_TEXT_RULES}
 
-分量:
-- 各章に指定された**行数**を満たす。1行は1〜2文、{CHARS_PER_LINE}文字前後。
-- 行数を満たせば spoken の合計は約{target_chars}文字（{target_chars // 400}分）になる。
-  日本語のナレーションは1分あたり約400文字です。
-- 短く終わらせない。指定行数に届くまで、出典の中身を具体的に展開する。
+進め方:
+- 台本は**章ごとに**依頼される。全体の章立てと、ここまでの台詞が毎回渡されるので、続きとして書く。
+- 章に指定された**行数**（±3行）を守る。1行は1〜2文、{CHARS_PER_LINE}文字前後。
+  全章あわせて約{target_chars}文字（{target_chars // 400}分。日本語のナレーションは1分あたり約400文字）。
+- 板（図）は章をまたいで残る。前の章の図を使い回すなら clear せずに書き足してよい。
+- 差し戻された章は、指摘された行だけでなく章全体を提出し直す。
 
 このテーマで禁止されていること:
 {chr(10).join('- ' + b for b in theme.banned)}"""
 
 
-def _user_prompt(idea, sources, plan: list[dict[str, Any]], target_chars: int) -> str:
+def _sources_block(idea, sources) -> str:
+    """The idea and its sources: the same on every call for this idea, so it
+    sits in the cached prefix rather than being paid for nine times."""
     parts = [
         f"タイトル: {idea['hook']}",
         f"この動画が答える問い: {idea['scene_summary']}",
@@ -217,9 +253,54 @@ def _user_prompt(idea, sources, plan: list[dict[str, Any]], target_chars: int) -
     for source in sources:
         when = (source["published_at"] or "")[:10]
         parts.append(f"[{source['ref']}] ({source['kind']}, {when}) {source['title']}")
-        parts.append(f"      {source['url']}")
+        if source["url"]:
+            parts.append(f"      {source['url']}")
         if source["summary"]:
             parts.append(f"      {source['summary'][:600]}")
+    return "\n".join(parts)
+
+
+def _chapter_prompt(plan: list[dict[str, Any]], index: int, previous: list[Chapter],
+                    stage_items: list[str], feedback: str = "") -> str:
+    """What to write now: the whole skeleton for orientation, the chapters
+    already written for continuity, this chapter's brief, and the items
+    currently on the stage so references resolve."""
+    chapter = plan[index]
+    parts = ["台本は章ごとに書きます。全体の章立て:"]
+    for i, c in enumerate(plan):
+        mark = "→" if i == index else " "
+        parts.append(f"  {mark} {c['key']}: {c['title']} — {c['covers'][:40]}（{c['lines']}行）")
+    if previous:
+        parts += ["", "ここまでに書いた台詞（続きとして自然につながるように）:"]
+        if len(previous) > 2:
+            parts.append("  （それ以前の章: " + " / ".join(c.title for c in previous[:-2]) + "）")
+        for c in previous[-2:]:
+            parts.append(f"[{c.key}]")
+            for line in c.lines:
+                parts.append(f"  {line.speaker}: {line.display}")
+    parts += ["", f"いま書く章: {chapter['key']}「{chapter['title']}」",
+              f"内容: {chapter['covers']}",
+              f"図: {chapter['visual']}" if chapter.get("visual") else "",
+              f"行数: {chapter['lines']}行（±3行）。1行は1〜2文、{CHARS_PER_LINE}字前後。"]
+    if chapter.get("ends_with_question"):
+        parts.append("この章は疑問で終える（最後の2行のどちらかを listener の疑問文に）。")
+    if index == 0:
+        parts.append("hooks に、この章の最初の一言の3案を入れる（本題名・数字・専門用語なし）。")
+    else:
+        parts.append("hooks は空配列。")
+    if index == len(plan) - 1:
+        parts.append("最後の行は closing_line で締める。")
+    parts.append("最初の行の visual は clear から始める（背景を変えるなら background も）。")
+    if stage_items:
+        parts.append(f"clear する前の板にあるもの: {', '.join(stage_items[-10:])}")
+    if feedback:
+        parts += ["", feedback]
+    parts.append("submit_chapter で提出してください。")
+    return "\n".join(p for p in parts if p is not None)
+
+
+def _user_prompt(idea, sources, plan: list[dict[str, Any]], target_chars: int) -> str:
+    parts = [_sources_block(idea, sources)]
 
     total_lines = sum(c["lines"] for c in plan)
     parts += ["", f"章構成（key はこのまま使うこと。各章の行数は必ず満たすこと。合計 {total_lines} 行）:"]
@@ -377,6 +458,67 @@ def check_structure(script: Script, plan: list[dict[str, Any]]) -> list[str]:
     return problems
 
 
+def check_chapter(chapter: Chapter, brief: dict[str, Any], canvas: Canvas, known_refs: set[str]) -> list[str]:
+    """Everything wrong with one chapter, against the stage as it stands.
+
+    The canvas passed in is a scratch copy; the caller commits the real one
+    only when the chapter is accepted.
+    """
+    problems: list[str] = []
+    if not chapter.lines:
+        return ["lines が空。台詞を書くこと"]
+    wanted = int(brief.get("lines", len(chapter.lines)))
+    if abs(len(chapter.lines) - wanted) > max(3, wanted * 0.35):
+        problems.append(f"行数が{len(chapter.lines)}行（指定は{wanted}行±3）")
+
+    max_hold = MAX_HOLD_RUN_ROOM if chapter.key in ROOM_CHAPTERS else MAX_HOLD_RUN
+    hold_run = 0
+    for li, line in enumerate(chapter.lines):
+        where = f"{chapter.key}:{li + 1}「{line.display[:14]}」"
+        try:
+            ops = dsl.parse_many(line.visual) if line.visual else [{"op": "hold"}]
+        except dsl.DSLError as exc:
+            problems.append(f"{where} の visual が読めない: {exc}")
+            line.ops = [{"op": "hold"}]
+            line.broken = True
+            continue
+        line.ops = ops
+        line.broken = False
+        for op in ops:
+            try:
+                canvas.apply(op)
+            except CanvasError as exc:
+                problems.append(f"{where} の visual が適用できない: {exc}")
+                line.broken = True
+                break
+        if all(op["op"] in ("hold", "expression") for op in ops):
+            hold_run += 1
+            if hold_run == max_hold + 1:
+                problems.append(f"{where} で板が{max_hold + 1}行以上動いていない（1行1手で図を育てること）")
+        else:
+            hold_run = 0
+        if len(line.display) > MAX_DISPLAY_CHARS:
+            problems.append(f"{where} の display が{len(line.display)}字（{MAX_DISPLAY_CHARS}字まで。2文に分ける）")
+        remaining = reading.check_spoken(line.spoken)
+        if remaining:
+            problems.append(f"{where} の spoken に読めない表記: {remaining}")
+    first = chapter.lines[0].ops
+    if not first or first[0].get("op") not in ("clear", "background"):
+        problems.append(f"{chapter.key} の最初の行は clear から始めること")
+
+    report = citations.check([chapter.as_dict()], known_refs)
+    if report.uncited:
+        problems.append(f"{len(report.uncited)} 行が数値を出典なしで述べている: " + "; ".join(u[:30] for u in report.uncited[:3]))
+    if report.unknown_refs:
+        problems.append(f"存在しない出典ID: {sorted(set(report.unknown_refs))}")
+
+    if brief.get("ends_with_question"):
+        tail = [line.display for line in chapter.lines[-2:]]
+        if not any("？" in d or "?" in d for d in tail):
+            problems.append(f"{chapter.key} は疑問で終えること（最後の行「{chapter.lines[-1].display[:20]}」）")
+    return problems
+
+
 def validate(script: Script, known_refs: set[str], target_chars: int,
              plan: list[dict[str, Any]] | None = None) -> list[str]:
     """Everything wrong with this script, in the order it would hurt."""
@@ -496,50 +638,21 @@ def run(
             known_refs = {s["ref"] for s in sources}
             theme = config.theme_by_id(idea["series_id"])
             plan = _chapter_plan(_research_plan(idea), target_chars)
-            system = _system_prompt(brand, theme, target_chars)
-            user = _user_prompt(idea, sources, plan, target_chars)
+            system = [_system_prompt(brand, theme, target_chars), _sources_block(idea, sources)]
 
-            # A rejected script is sent back with its problems, up to the
-            # retry cap, in this same run. Most rejections are one fixable
-            # thing — a broken visual reference, a chapter that forgot to end
-            # on a question — and the model fixes them when told; without the
-            # feedback it just writes another script with different mistakes.
-            script = None
-            problems: list[str] = []
-            feedback = ""
-            for round_no in range(max_retries - int(idea["attempts"])):
-                try:
-                    response = client.call_tool(system=system, user=user + feedback, tool=SCRIPT_TOOL)
-                except Exception as exc:  # noqa: BLE001 - one idea must not kill the run
-                    log.error("script generation failed for idea %d: %s", current_id, exc)
-                    problems = [str(exc)]
-                    break
-
-                if response.cost_usd:
-                    db.insert_llm_call(
-                        conn, purpose="script", model=response.model,
-                        input_tokens=response.input_tokens, output_tokens=response.output_tokens,
-                        cost_usd=response.cost_usd,
-                    )
-                    conn.commit()
-                    result.llm_cost_usd += response.cost_usd
-
-                script = _parse(response.payload)
-                problems = validate(script, known_refs, target_chars, plan)
-                if not problems:
-                    break
-                dump = _dump_rejected(current_id, round_no, response, problems)
-                log.error("idea %d rejected (round %d, %d output tokens, stop=%s): %s — raw payload in %s",
-                          current_id, round_no + 1, response.output_tokens, response.stop_reason,
-                          "; ".join(problems), dump)
-                db.bump_attempts(conn, current_id)
-                conn.commit()
-                feedback = _feedback(problems)
-
-            if problems or script is None:
+            script, problems, spent = write_chapters(client, system, plan, known_refs, current_id,
+                                                     rounds=max_retries, record=lambda r: _record_call(conn, r))
+            result.llm_cost_usd += spent
+            if script is None:
                 result.rejected += 1
                 result.errors.append(f"idea {current_id}: " + "; ".join(problems))
+                db.bump_attempts(conn, current_id)
+                conn.commit()
                 continue
+            for problem in problems:
+                # accepted with degradations; say so, do not stop
+                log.warning("idea %d: %s", current_id, problem)
+                result.errors.append(f"idea {current_id} (accepted): {problem}")
 
             if dry_run:
                 result.written += 1
@@ -554,9 +667,12 @@ def run(
                 chapters=script.as_dicts(),
                 hooks=script.hooks,
                 char_count=script.char_count,
-                model=response.model,
+                model=client.model,
             )
             db.set_idea_status(conn, current_id, "scripted")
+            preview = write_preview(script, current_id)
+            if preview:
+                log.info("idea %d: figure preview at %s", current_id, preview)
             db.reset_attempts(conn, current_id)
             conn.commit()
 
@@ -572,6 +688,151 @@ def run(
     return result
 
 
+def write_preview(script: Script, idea_id: int) -> Path | None:
+    """A contact sheet of the stage at four points in every chapter, so the
+    figures can be judged before a minute of narration is synthesised."""
+    from PIL import Image
+
+    from .. import paths
+    from ..canvas import AssetLibrary, SpriteSet
+
+    try:
+        brand = brand_mod.load_brand()
+        sprites = SpriteSet(paths.SPRITES_DIR, {r: n.sprite for r, n in brand.navigators.items()})
+        canvas = Canvas(assets=AssetLibrary(paths.ASSETS_DIR))
+        frames = []
+        for chapter in script.chapters:
+            n = len(chapter.lines)
+            marks = sorted({max(0, n - 1), n // 4, n // 2, (3 * n) // 4}) if n else []
+            for i, line in enumerate(chapter.lines):
+                for op in line.ops or [{"op": "hold"}]:
+                    try:
+                        canvas.apply(op)
+                    except CanvasError:
+                        break
+                if i in marks:
+                    img = canvas.render(subtitle=line.display, speaker=line.speaker, sprites=sprites)
+                    frames.append(img.resize((480, 270), Image.LANCZOS))
+        if not frames:
+            return None
+        cols = 4
+        rows = (len(frames) + cols - 1) // cols
+        sheet = Image.new("RGB", (cols * 484 + 4, rows * 274 + 4), (40, 40, 40))
+        for i, frame in enumerate(frames):
+            sheet.paste(frame, (4 + (i % cols) * 484, 4 + (i // cols) * 274))
+        folder = paths.WORK_DIR / "logs"
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"script_idea{idea_id:05d}_preview.png"
+        sheet.save(path)
+        return path
+    except Exception as exc:  # noqa: BLE001 - a preview must never fail the script
+        log.warning("preview failed: %s", exc)
+        return None
+
+
+def _record_call(conn, response) -> None:
+    if response.cost_usd:
+        db.insert_llm_call(
+            conn, purpose="script", model=response.model,
+            input_tokens=response.input_tokens + response.cache_read_tokens + response.cache_write_tokens,
+            output_tokens=response.output_tokens, cost_usd=response.cost_usd,
+        )
+        conn.commit()
+
+
+def write_chapters(client, system: list[str], plan: list[dict[str, Any]], known_refs: set[str],
+                   idea_id: int, rounds: int = 2, record=None) -> tuple[Script | None, list[str], float]:
+    """Write the script one chapter at a time, on a persistent stage.
+
+    Each chapter gets `rounds` attempts with its problems fed back. A chapter
+    still wrong after that is accepted with its broken visual lines dropped
+    to `hold` — a figure fewer, not a video fewer — unless it has no lines at
+    all, which fails the script. Returns the script (or None), the notes
+    (degradations, or the fatal problem), and what it cost.
+    """
+    canvas = Canvas()
+    chapters: list[Chapter] = []
+    hooks: list[str] = []
+    notes: list[str] = []
+    spent = 0.0
+
+    for index, brief in enumerate(plan):
+        feedback = ""
+        chapter: Chapter | None = None
+        problems: list[str] = []
+        stage_items = [i.name for i in canvas.state.items if i.kind == "element"]
+        for round_no in range(rounds):
+            user = _chapter_prompt(plan, index, chapters, stage_items, feedback)
+            try:
+                response = client.call_tool(system=system, user=user, tool=CHAPTER_TOOL, max_tokens=12000)
+            except Exception as exc:  # noqa: BLE001 - reported, the run moves on
+                return None, [f"{brief['key']}: {exc}"], spent
+            spent += response.cost_usd
+            if record:
+                record(response)
+            chapter = _parse_chapter(response.payload, brief)
+            scratch = copy.deepcopy(canvas)
+            problems = check_chapter(chapter, brief, scratch, known_refs)
+            if not problems:
+                canvas = scratch
+                break
+            _dump_rejected(idea_id, round_no, response, problems, suffix=brief["key"])
+            log.warning("idea %d %s round %d: %s", idea_id, brief["key"], round_no + 1, "; ".join(problems[:4]))
+            feedback = _feedback(problems)
+        else:
+            # out of rounds: keep the chapter, drop what does not render
+            if chapter is None or not chapter.lines:
+                return None, [f"{brief['key']}: 台詞が書けなかった"], spent
+            dropped = 0
+            for line in chapter.lines:
+                if getattr(line, "broken", False):
+                    line.ops = [{"op": "hold"}]
+                    line.visual = ["hold"]
+                    dropped += 1
+            for line in chapter.lines:
+                for op in line.ops:
+                    try:
+                        canvas.apply(op)
+                    except CanvasError:
+                        line.ops = [{"op": "hold"}]
+                        break
+            notes.append(f"{brief['key']}: {len(problems)} 件を残して採用（板書を落とした行 {dropped}）: " + "; ".join(problems[:3]))
+        chapters.append(chapter)
+        if index == 0:
+            hooks = [h for h in chapter.hooks if h.strip()][:3]
+
+    script = Script(chapters=chapters, hooks=hooks)
+    lines = [line for c in chapters for line in c.lines]
+    share = sum(1 for line in lines if line.speaker == "listener") / max(len(lines), 1)
+    if not (LISTENER_SHARE[0] <= share <= LISTENER_SHARE[1]):
+        notes.append(f"listener の発話が{share:.0%}（目安 {LISTENER_SHARE[0]:.0%}〜{LISTENER_SHARE[1]:.0%}）")
+    if len(hooks) < 3:
+        hooks += [chapters[0].lines[0].display] * (3 - len(hooks))
+        script.hooks = hooks
+    return script, notes, spent
+
+
+def _parse_chapter(payload: dict[str, Any], brief: dict[str, Any]) -> Chapter:
+    chapter = Chapter(
+        key=brief["key"],
+        title=str(payload.get("title") or brief["title"]).strip(),
+        visual_intent=str(payload.get("visual_intent", "")).strip(),
+        lines=[
+            Line(
+                speaker=line.get("speaker", "explainer"),
+                display=str(line.get("display", "")).strip(),
+                spoken=str(line.get("spoken", "")).strip(),
+                refs=[r.strip() for r in line.get("refs", []) if r.strip()],
+                visual=[v.strip() for v in line.get("visual", []) if v.strip()],
+                expression=line.get("expression", "normal") or "normal",
+            )
+            for line in payload.get("lines", []) if line.get("display")
+        ],
+    )
+    chapter.hooks = [str(h) for h in payload.get("hooks", [])]
+    return chapter
+
+
 def _feedback(problems: list[str]) -> str:
     return (
         "\n\n前回の提出は次の理由で差し戻されました。全部直して、台本全体をもう一度提出してください:\n"
@@ -581,14 +842,15 @@ def _feedback(problems: list[str]) -> str:
     )
 
 
-def _dump_rejected(idea_id: int, round_no: int, response, problems: list[str]):
+def _dump_rejected(idea_id: int, round_no: int, response, problems: list[str], suffix: str = ""):
     """Keep the raw payload of a rejected script, so a rejection can be read
     rather than guessed at. Cheap insurance: the call already cost money."""
     from .. import paths
 
     folder = paths.WORK_DIR / "logs"
     folder.mkdir(parents=True, exist_ok=True)
-    path = folder / f"script_rejected_idea{idea_id:05d}_round{round_no + 1}.json"
+    tag = f"_{suffix}" if suffix else ""
+    path = folder / f"script_rejected_idea{idea_id:05d}{tag}_round{round_no + 1}.json"
     path.write_text(json.dumps({
         "problems": problems,
         "stop_reason": response.stop_reason,

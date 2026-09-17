@@ -128,6 +128,8 @@ class Line:
     visual: list[str] = field(default_factory=list)
     ops: list[dict[str, Any]] = field(default_factory=list)
     expression: str = "normal"
+    # set by validation: the visual could not be applied (not stored)
+    broken: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -159,6 +161,7 @@ class Chapter:
     visual_intent: str = ""  # English search phrase for a photo to dim behind the stage
     lines: list[Line] = field(default_factory=list)
     key: str = ""            # which slot of the episode skeleton this fills
+    hooks: list[str] = field(default_factory=list)   # opener only: the three opening lines
 
     @property
     def display_text(self) -> str:

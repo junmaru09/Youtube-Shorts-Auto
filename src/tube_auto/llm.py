@@ -35,6 +35,8 @@ class LLMResponse:
     model: str
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
     cost_usd: float = 0.0
     stop_reason: str = ""
     raw_text: str = ""
@@ -67,17 +69,25 @@ class LLMClient:
     def call_tool(
         self,
         *,
-        system: str,
+        system: str | list[str],
         user: str,
         tool: dict[str, Any],
         max_tokens: int | None = None,
         temperature: float | None = None,
     ) -> LLMResponse:
-        """Run one forced tool call and return its input plus what it cost."""
+        """Run one forced tool call and return its input plus what it cost.
+
+        `system` may be a list of blocks; every block is marked for prompt
+        caching, so a stage that makes several calls with the same rules and
+        sources (the script writes nine chapters) pays for that prefix once.
+        The tool comes before the system in the cached prefix, so it must be
+        byte-stable across calls too.
+        """
+        blocks = [system] if isinstance(system, str) else list(system)
         kwargs: dict[str, Any] = {
             "model": self.model,
             "max_tokens": max_tokens or self.max_tokens,
-            "system": system,
+            "system": [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}} for text in blocks],
             "tools": [tool],
             "tool_choice": {"type": "tool", "name": tool["name"]},
             "messages": [{"role": "user", "content": user}],
@@ -94,13 +104,17 @@ class LLMClient:
         usage = getattr(response, "usage", None)
         input_tokens = getattr(usage, "input_tokens", 0) or 0
         output_tokens = getattr(usage, "output_tokens", 0) or 0
+        cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+        cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
 
         result = LLMResponse(
             payload={},
             model=self.model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            cost_usd=estimate_llm_cost(self.model, input_tokens, output_tokens),
+            cache_read_tokens=cache_read,
+            cache_write_tokens=cache_write,
+            cost_usd=estimate_llm_cost(self.model, input_tokens, output_tokens, cache_read, cache_write),
             stop_reason=getattr(response, "stop_reason", "") or "",
         )
 
@@ -124,8 +138,8 @@ class LLMClient:
                 f"(stop_reason={result.stop_reason}). Text was: {result.raw_text[:200]}"
             )
 
-        log.debug(
-            "%s: %d in / %d out tokens, $%.4f",
-            tool["name"], input_tokens, output_tokens, result.cost_usd,
+        log.info(
+            "%s: %d in (+%d cached, %d written) / %d out tokens, $%.4f",
+            tool["name"], input_tokens, cache_read, cache_write, output_tokens, result.cost_usd,
         )
         return result

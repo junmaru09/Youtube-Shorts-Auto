@@ -29,11 +29,16 @@ IMAGE_PRICES_USD: dict[str, float] = {
 }
 
 # Per-million-token prices for the ideation model.
+# First-party API rates, checked 2026-09 against the model table. Cache reads
+# are a tenth of the input rate, cache writes a quarter more.
 LLM_PRICES_USD_PER_MTOK: dict[str, dict[str, float]] = {
-    "claude-sonnet-5": {"input": 3.00, "output": 15.00},
-    "claude-opus-5": {"input": 15.00, "output": 75.00},
+    "claude-sonnet-5": {"input": 2.00, "output": 10.00},
+    "claude-opus-5": {"input": 5.00, "output": 25.00},
+    "claude-haiku-4-5": {"input": 1.00, "output": 5.00},
     "claude-haiku-4-5-20251001": {"input": 1.00, "output": 5.00},
 }
+CACHE_READ_FACTOR = 0.1
+CACHE_WRITE_FACTOR = 1.25
 
 
 class UnknownPriceError(KeyError):
@@ -62,13 +67,17 @@ def estimate_image_cost(model: str, count: int) -> float:
     return round(price_per_image(model) * count, 4)
 
 
-def estimate_llm_cost(model: str, input_tokens: int, output_tokens: int) -> float:
+def estimate_llm_cost(model: str, input_tokens: int, output_tokens: int,
+                      cache_read_tokens: int = 0, cache_write_tokens: int = 0) -> float:
     prices = LLM_PRICES_USD_PER_MTOK.get(model)
     if prices is None:
         # Unknown model: charge the most expensive listed rate rather than zero,
         # so an unrecognised model cannot slip past the budget for free.
         prices = max(LLM_PRICES_USD_PER_MTOK.values(), key=lambda p: p["output"])
+    per_in, per_out = prices["input"] / 1_000_000, prices["output"] / 1_000_000
     return round(
-        input_tokens / 1_000_000 * prices["input"] + output_tokens / 1_000_000 * prices["output"],
+        input_tokens * per_in + output_tokens * per_out
+        + cache_read_tokens * per_in * CACHE_READ_FACTOR
+        + cache_write_tokens * per_in * CACHE_WRITE_FACTOR,
         6,
     )
