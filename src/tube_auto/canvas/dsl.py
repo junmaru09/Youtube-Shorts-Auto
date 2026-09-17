@@ -92,6 +92,14 @@ def _list(key: str, raw: str, op: str) -> Any:
     return [_item(shape, s, key) for s in items]
 
 
+# The one argument an op is usually given, so `background space`,
+# `label 正のフィードバック at=top` and `background=space` all parse. The
+# script model writes these forms a fair share of the time; refusing them
+# only costs another round.
+_PRIMARY = {"background": "name", "label": "text", "heading": "text", "title": "text",
+            "list_add": "text", "highlight": "target", "strike": "target"}
+
+
 def parse(line: str) -> dict[str, Any]:
     """One DSL line to one operation dict."""
     line = line.strip()
@@ -101,16 +109,28 @@ def parse(line: str) -> dict[str, Any]:
     op, _, first = head.partition(" ")
     op = op.strip()
     if "=" in op:
-        raise DSLError(f"line must start with an operation name, got {line[:40]!r}")
+        # `background=space`: the op given as if it were a key
+        op, _, positional = op.partition("=")
+        if op not in _PRIMARY:
+            raise DSLError(f"line must start with an operation name, got {line[:40]!r}")
+        rest.insert(0, f"{_PRIMARY[op]}={positional}")
     if first.strip():
-        rest.insert(0, first.strip())
+        chunk = first.strip()
+        if "=" not in chunk and op in _PRIMARY:
+            chunk = f"{_PRIMARY[op]}={chunk}"      # `background space`
+        rest.insert(0, chunk)
 
     args: dict[str, Any] = {}
     for chunk in rest:
         key, sep, value = chunk.partition("=")
         if not sep:
-            raise DSLError(f"expected key=value, got {chunk!r} in {line[:60]!r}")
+            if op in _PRIMARY and _PRIMARY[op] not in args:
+                key, value, sep = _PRIMARY[op], chunk, "="
+            else:
+                raise DSLError(f"expected key=value, got {chunk!r} in {line[:60]!r}")
         key, value = key.strip(), value.strip()
+        if op == "background" and key == value:
+            key = "name"                          # `background room=room`
         if key == "rows":
             args[key] = [[c.strip() for c in row.split("|")] for row in value.split(";") if row.strip()]
         elif key in _LIST_KEYS:

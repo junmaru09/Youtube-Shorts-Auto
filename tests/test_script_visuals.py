@@ -44,9 +44,28 @@ def test_unknown_op_and_bad_syntax_are_dsl_errors():
     with pytest.raises(dsl.DSLError):
         dsl.parse("frobnicate x=1")
     with pytest.raises(dsl.DSLError):
-        dsl.parse("label text")
+        dsl.parse("arrow sun")                    # arrow has no positional argument
     with pytest.raises(dsl.DSLError):
         dsl.parse("chain nodes=a:0:0 edges=x-y")
+
+
+def test_the_forms_the_model_actually_writes_parse():
+    """Seen in a rejected script: the op given as a key, a bare value, and
+    the value repeated as its own key."""
+    assert dsl.parse("background=space") == {"op": "background", "name": "space"}
+    assert dsl.parse("background space") == {"op": "background", "name": "space"}
+    assert dsl.parse("background room=room") == {"op": "background", "name": "room"}
+    assert dsl.parse("label 正のフィードバック at=top") == {"op": "label", "text": "正のフィードバック", "at": "top"}
+
+
+def test_every_item_has_edge_parts():
+    c = Canvas()
+    c.apply(dsl.parse("galaxy slot=center name=g1"))
+    x0, y0, x1, y1 = c.state.find("g1").box
+    top = c.state.box_of("g1.top")
+    assert abs((top[0] + top[2]) / 2 - (x0 + x1) / 2) < 1 and abs(top[1] + 8 - y0) < 1
+    with pytest.raises(CanvasError):
+        c.state.box_of("g1.nucleus")
 
 
 def test_missing_arguments_become_canvas_errors():

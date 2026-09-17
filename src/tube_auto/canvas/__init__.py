@@ -119,9 +119,13 @@ class State:
         if "." in ref:
             item_name, part = ref.split(".", 1)
             item = self.find(item_name)
-            if part not in item.parts:
-                raise CanvasError(f"{item_name!r} has no part {part!r} (has: {sorted(item.parts)})")
-            return item.parts[part]
+            if part in item.parts:
+                return item.parts[part]
+            edge = _edge_part(item.box, part)
+            if edge is not None:
+                return edge
+            raise CanvasError(f"{item_name!r} has no part {part!r} (has: {sorted(item.parts)}, "
+                              "plus top/bottom/left/right/centre on anything)")
         return self.find(ref).box
 
 
@@ -240,6 +244,8 @@ class Canvas:
     def _op_add(self, op: dict[str, Any]) -> None:
         """A new element positioned relative to an existing one."""
         element = op["element"]
+        if element not in E.REGISTRY and not (self.assets and self.assets.has(element)):
+            raise CanvasError(f"unknown element {element!r}; one of {sorted(E.REGISTRY)}")
         near = self.state.find(op["near"])
         siblings = [i for i in self.state.items if i.props.get("element") == element and i.props.get("near") == near.name]
         rule = ATTACH.get(element, "beside")
@@ -567,6 +573,19 @@ class Canvas:
 
 
 # --- helpers ---------------------------------------------------------------------
+
+
+def _edge_part(box: Box, part: str) -> Box | None:
+    """`.top` and friends on any item: a point on that edge, or the centre.
+    Elements name their meaningful parts; these are the ones every box has."""
+    x0, y0, x1, y1 = box
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    points = {"top": (cx, y0), "bottom": (cx, y1), "left": (x0, cy), "right": (x1, cy),
+              "centre": (cx, cy), "center": (cx, cy)}
+    if part not in points:
+        return None
+    px, py = points[part]
+    return (px - 8, py - 8, px + 8, py + 8)
 
 
 def _edge_points(a: Box, b: Box, pad: float = 14.0) -> tuple[tuple[float, float], tuple[float, float]]:

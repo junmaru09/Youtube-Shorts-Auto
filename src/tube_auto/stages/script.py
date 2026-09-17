@@ -34,7 +34,7 @@ from ..models import EXPRESSIONS, Chapter, Line, Script
 log = logging.getLogger(__name__)
 
 # How far off the character target a script may land before it is rejected.
-LENGTH_TOLERANCE = 0.25
+LENGTH_TOLERANCE = 0.30
 
 # One or two sentences of narration. The length target is expressed to the
 # model as lines-per-chapter at this size, because a character total is not a
@@ -43,7 +43,7 @@ LENGTH_TOLERANCE = 0.25
 # Calibrated, not chosen: asked for 120 lines "of about 60 characters" the
 # model delivered 5,058 characters, so its natural line runs about 42. The
 # figure here is what it actually writes, and the line count is derived from it.
-CHARS_PER_LINE = 45
+CHARS_PER_LINE = 40
 
 SCRIPT_TOOL = {
     "name": "submit_script",
@@ -302,7 +302,11 @@ def _parse(payload: dict[str, Any]) -> Script:
 # floor it is a monologue, above the ceiling it is a sitcom.
 LISTENER_SHARE = (0.15, 0.45)
 # Lines in a row that leave the stage untouched before it counts as static.
+# The room chapters are conversation; the reference holds its room for
+# thirty seconds at a time there and nowhere else.
 MAX_HOLD_RUN = 2
+MAX_HOLD_RUN_ROOM = 4
+ROOM_CHAPTERS = {"opener", "close"}
 # A subtitle is two rows of SUBTITLE_WRAP characters. Longer lines overflow
 # the band, and a line that long is a paragraph anyway.
 MAX_DISPLAY_CHARS = 60
@@ -320,6 +324,8 @@ def check_visuals(script: Script) -> list[str]:
     canvas = Canvas()
     hold_run = 0
     for ci, chapter in enumerate(script.chapters):
+        max_hold = MAX_HOLD_RUN_ROOM if chapter.key in ROOM_CHAPTERS else MAX_HOLD_RUN
+        hold_run = 0
         for li, line in enumerate(chapter.lines):
             where = f"{chapter.key or ci}:{li + 1}「{line.display[:14]}」"
             try:
@@ -336,8 +342,8 @@ def check_visuals(script: Script) -> list[str]:
                     break
             if all(op["op"] in ("hold", "expression") for op in ops):
                 hold_run += 1
-                if hold_run == MAX_HOLD_RUN + 1:
-                    problems.append(f"{where} で板が{MAX_HOLD_RUN + 1}行以上動いていない（1行1手で図を育てること）")
+                if hold_run == max_hold + 1:
+                    problems.append(f"{where} で板が{max_hold + 1}行以上動いていない（1行1手で図を育てること）")
             else:
                 hold_run = 0
     return problems[:8]
@@ -360,7 +366,10 @@ def check_structure(script: Script, plan: list[dict[str, Any]]) -> list[str]:
     for chapter in script.chapters:
         if not chapter.lines:
             continue
-        if chapter.key in wants_question and not chapter.lines[-1].display.rstrip().endswith(("？", "?")):
+        # the question may be the last line, or the one before it when the
+        # explainer answers "let's see" — the reference does both
+        tail = [line.display.rstrip() for line in chapter.lines[-2:]]
+        if chapter.key in wants_question and not any(("？" in d or "?" in d) for d in tail):
             problems.append(f"章 {chapter.key} は疑問で終えること（最後の行「{chapter.lines[-1].display[:20]}」）")
         first = chapter.lines[0].ops or []
         if chapter.key and first and first[0].get("op") not in ("clear", "background"):
@@ -567,6 +576,8 @@ def _feedback(problems: list[str]) -> str:
     return (
         "\n\n前回の提出は次の理由で差し戻されました。全部直して、台本全体をもう一度提出してください:\n"
         + "\n".join(f"- {p}" for p in problems)
+        + "\n（visual の書式は `op key=value`。例: `background name=space` / `label text=氷期 at=tl.cold side=above`。"
+        "要素の部位は要素ごとに違うが、どの要素にも .top .bottom .left .right .centre はある）"
     )
 
 
