@@ -367,6 +367,19 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_skip(args: argparse.Namespace) -> int:
+    """Take an idea out of every queue without deleting its records."""
+    with db.session() as conn:
+        row = db.get_idea(conn, args.idea)
+        if row is None:
+            print(f"no idea {args.idea}", file=sys.stderr)
+            return 1
+        db.set_idea_status(conn, args.idea, "failed")
+        conn.commit()
+    print(f"idea {args.idea} ({row['hook'][:40]}) marked failed; it will not be picked up again")
+    return 0
+
+
 def cmd_gc(args: argparse.Namespace) -> int:
     """Delete work files no database row refers to."""
     with db.session() as conn:
@@ -489,6 +502,10 @@ def build_parser() -> argparse.ArgumentParser:
         func=cmd_sync_stats
     )
     sub.add_parser("report", help="expand-or-stop decision numbers").set_defaults(func=cmd_report)
+
+    p = sub.add_parser("skip", help="mark an idea failed so no stage picks it up (e.g. a pre-whiteboard script)")
+    p.add_argument("--idea", type=int, required=True)
+    p.set_defaults(func=cmd_skip)
 
     p = sub.add_parser("gc", help="delete work files nothing refers to")
     p.add_argument("--dry-run", action="store_true")

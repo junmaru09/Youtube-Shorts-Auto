@@ -14,8 +14,42 @@ sprites/metan/…                      四国めたんも同じ構成
 
 - 透過PNG。縦横どちらかが 320px 以上あればよい（描画時に縮小される）。
 - `normal_closed.png` だけあれば動く。無い表情は normal に、無い口開きは閉じにフォールバックする。
-- どちらのキャラも公式の立ち絵（坂本アヒル氏）が配布されている。**各キャラクターの利用規約を読み、クレジット（`VOICEVOX:ずんだもん` 等）を必ず入れる。** クレジット文は `brand.py` の `credit` にある。
-- 立ち絵は PSD で口・目・眉がレイヤー分けされているので、口の開閉2枚を書き出す。
+
+### どこから取るか
+
+坂本アヒル氏の PSDTool 対応立ち絵（ニコニコ静画。ダウンロードにはニコニコのアカウントが要る）:
+
+- ずんだもん: https://seiga.nicovideo.jp/seiga/im10788496 （V3.2: https://seiga.nicovideo.jp/seiga/im11206626）
+- 四国めたん: https://seiga.nicovideo.jp/seiga/im10791276
+
+作者の条件は「公式の規約の範囲なら何に使ってもよい。クレジットは任意」。
+
+### 権利（2026-09 に確認）
+
+- **声**（VOICEVOX）: 商用・非商用とも可。クレジット `VOICEVOX:ずんだもん` / `VOICEVOX:四国めたん` を
+  概要欄か動画内に書く（音源利用規約 https://zunko.jp/con_ongen_kiyaku.html ）。`brand.py` の
+  `credit_line` が概要欄の先頭に入れる。
+- **キャラクター絵**: 東北ずん子・ずんだもんプロジェクトのガイドライン https://zunko.jp/guideline.html 。
+  「個人が自分のBlogやYoutubeに広告を出す、スーパーチャットを受け取る…程度は非商用の範囲」なので、
+  個人チャンネルの収益化はこの範囲。(c) 表記は不要。グッズ販売など本来の商用は別途許諾。
+- 四国めたんも同プロジェクトのキャラクターで、同じガイドラインの下にある。
+
+### PSD から PNG を切り出す
+
+手でレイヤーを切り替えて12回書き出すのではなく、`tools/sprite_export.py` に任せる。
+全フレームを同じ枠で切るので、口パクで絵がずれない。
+
+```bash
+pip install psd-tools
+python tools/sprite_export.py list  ~/Downloads/ずんだもん立ち絵.psd     # レイヤー構成を見る
+python tools/sprite_export.py guess ~/Downloads/ずんだもん立ち絵.psd > config/sprites/zundamon.yaml
+#   ↑ 下書き。list の出力と見比べて、目・眉・口・体のレイヤーを1つずつ指定する
+python tools/sprite_export.py export ~/Downloads/ずんだもん立ち絵.psd assets/sprites/zundamon --recipe config/sprites/zundamon.yaml
+```
+
+レシピは `base`（毎フレーム表示：体・服・肌）、`expressions`（表情ごとの目と眉）、`mouth`（閉/開）
+の3つ。レイヤーは `目/通常` のように `/` 区切りで指定し、一意ならレイヤー名だけでもよい。
+PSDTool の `!` `*` 接頭辞は無視して照合する。
 
 ## illustrations/ — 図に置くイラスト
 

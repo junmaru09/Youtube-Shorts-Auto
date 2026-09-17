@@ -16,7 +16,8 @@ dependencies = [
 
 [project.optional-dependencies]
 review = ["streamlit>=1.40.0"]
-dev = ["pytest>=8.0.0", "numpy>=1.26"]
+dev = ["pytest>=8.0.0", "numpy>=1.26", "psd-tools>=1.10"]
+sprites = ["psd-tools>=1.10"]      # tools/sprite_export.py
 
 [project.scripts]
 tube-auto = "tube_auto.cli:main"
