@@ -430,6 +430,9 @@ def table(d: ImageDraw.ImageDraw, box: Box, columns: list[str], rows: list[list[
                 continue
             colour = S.YELLOW if highlight and cell == highlight else S.WHITE
             outlined_text(d, (x0 + col_w * ci + 30, y), cell, S.SIZE_TABLE, colour, anchor="lm")
+            tw, th = text_size(cell, S.SIZE_TABLE)
+            parts[str(cell)] = (x0 + col_w * ci + 30, y - th / 2, x0 + col_w * ci + 30 + tw, y + th / 2)
+            parts[f"r{ri + 1}c{ci + 1}"] = parts[str(cell)]
         parts[f"row{ri + 1}"] = (x0, y - S.TABLE_ROW / 2, x1, y + S.TABLE_ROW / 2)
     return parts
 
@@ -646,9 +649,10 @@ def scatter(d: ImageDraw.ImageDraw, box: Box, points: list[dict[str, Any]] | Non
         fit = S.PALETTE.get(colour, S.YELLOW)
         d.line(((lx0, my + slope * (lx0 - mx)), (lx1, my + slope * (lx1 - mx))), fill=S.INK, width=14)
         d.line(((lx0, my + slope * (lx0 - mx)), (lx1, my + slope * (lx1 - mx))), fill=fit, width=8)
-    for p, (cx, cy) in zip(pts, coords):
+    for i, (p, (cx, cy)) in enumerate(zip(pts, coords), start=1):
         r = 14
         filled_outlined(d, "ellipse", (cx - r, cy - r, cx + r, cy + r), S.PALETTE.get(p.get("colour", "white"), S.WHITE), width=4)
+        parts[f"p{i}"] = (cx - r, cy - r, cx + r, cy + r)
         if p.get("label"):
             outlined_text(d, (cx, cy - 34), str(p["label"]), S.SIZE_LABEL_SMALL - 6, S.WHITE)
             parts[str(p["label"])] = (cx - r, cy - r, cx + r, cy + r)

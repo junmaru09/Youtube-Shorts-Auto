@@ -49,13 +49,13 @@ VISUAL_MANUAL = f"""\
 - 天体: sun, earth_globe [ice=true], earth_arc [colour=green|orange], moon, galaxy, black_blob, star_dots
 - 物: ice_block, cloud, atom [electrons=2], charge [sign=+|-], telescope, person [label=…], balance [left=… right=… tilt=-1..1]
 - 概念: concept text=…（言葉だけを箱に）, wave [cycles=4 stretch=1.6 colour=]（光・音・赤方偏移。stretch で波長が伸びる）,
-  ladder rungs=近く|中|遠く（距離はしご・段階）, scatter points=x:y[:ラベル]|… [x_label= y_label= line=true]（点と直線のグラフ）
+  ladder rungs=近く|中|遠く（距離はしご・段階）, scatter points=x:y[:ラベル]|… [x_label= y_label= line=true]（点と直線のグラフ。部位=p1,p2…とラベル）
 - 構造図:
   - pie slices=名前:値:色[:注記]|…  [centre_label=…]   部位=各名前
   - box_row items=語|語|…                              部位=各語
   - timeline start=… end=… bands=from:to:色[:name]|…   部位=各name, band, axis
   - number_line low=小 high=大 [vertical=true] markers=位置:ラベル[:色[:side]]|… [span=a:b span_label=…]   部位=各ラベル
-  - table columns=A|B rows=セル|セル;セル|セル [highlight=セル文]   ➡ ◎ × は図形になる。部位=row1…
+  - table columns=A|B rows=セル|セル;セル|セル [highlight=セル文]   ➡ ◎ × は図形になる。部位=row1…, セルの文, r1c2
   - chain nodes=文:x:y[:色[:size]]|… edges=0-1|2-3        x,y は 0〜1。部位=各文
   - columns items=題:色:本文/改行|…                        部位=各題, 題.text
   - panel x=時間 y=高さ（空間） [warp=0.6]                  白い格子。部位=cell_c_r, origin

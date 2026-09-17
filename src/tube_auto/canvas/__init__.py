@@ -114,10 +114,12 @@ class State:
         for item in self.items:
             if item.name == name:
                 return item
-        # "arrow", "label": the most recent item of that kind, which is what
-        # a script means when it names none
+        # "arrow", "label", "chain", "table": the most recent item of that
+        # kind or element, which is what a script means when it named none
         for item in reversed(self.items):
-            if item.kind == name:
+            if item.kind == name or item.props.get("element") == name:
+                return item
+            if item.name.startswith(name) and item.name[len(name):].isdigit():
                 return item
         raise CanvasError(f"no item named {name!r} on the stage (items: {[i.name for i in self.items][-8:]})")
 
@@ -316,7 +318,9 @@ class Canvas:
 
     def _op_label(self, op: dict[str, Any]) -> None:
         text = str(op["text"])
-        at = op.get("at", "center")
+        at = str(op.get("at", "center"))
+        if " " in at and at.rsplit(" ", 1)[1] in ("above", "below", "left", "right", "on"):
+            at, op = at.rsplit(" ", 1)[0], {**op, "side": at.rsplit(" ", 1)[1]}   # `at=dense below`
         size = op.get("size", S.SIZE_LABEL)
         if isinstance(size, str):
             size = NAMED_SIZES.get(size.lower())

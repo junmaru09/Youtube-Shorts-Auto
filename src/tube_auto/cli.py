@@ -198,6 +198,20 @@ def cmd_research(args: argparse.Namespace) -> int:
 
 
 def cmd_script(args: argparse.Namespace) -> int:
+    if getattr(args, "chapter", None):
+        from .stages.script import rewrite_chapter
+
+        if args.idea is None:
+            print("--chapter needs --idea", file=sys.stderr)
+            return 2
+        script, problems, spent = rewrite_chapter(args.idea, args.chapter)
+        chapter = next(c for c in script.chapters if c.key == args.chapter)
+        print(f"script: chapter {args.chapter} rewritten, {len(chapter.lines)} lines, "
+              f"{script.char_count} chars total (~{script.char_count / 400:.1f} min), LLM ${spent:.4f}")
+        for problem in problems:
+            print(f"  ! (accepted): {problem}")
+        return 0
+
     from .stages import script
 
     result = script.run(
@@ -471,6 +485,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--reset-attempts", action="store_true",
                    help="clear the idea's retry count first (needs --idea)")
+    p.add_argument("--chapter", default=None,
+                   help="rewrite just this chapter of the stored script, e.g. history (needs --idea)")
     p.set_defaults(func=cmd_script)
 
     p = sub.add_parser("narrate", help="synthesise the narration")

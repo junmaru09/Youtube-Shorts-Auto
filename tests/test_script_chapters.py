@@ -166,3 +166,39 @@ def test_each_chapter_needs_its_kind_of_figure_and_the_persona_holds():
     plain = ch([["chain name=c nodes=甲:0.2:0.2|乙:0.8:0.8 edges=0-1"], ["label a at=top"], ["hold"], ["label c at=left"], ["hold"]], endings="です")
     problems = script_stage.check_chapter(plain, brief, Canvas(), set())
     assert any("語尾" in p for p in problems)
+
+
+def test_the_best_attempt_is_kept_not_the_last():
+    """Round one: 27 good lines with one bad reference. Round two: a stub.
+    Keep round one, degraded."""
+    from tube_auto.canvas import Canvas
+
+    plan = [{"key": "context", "title": "背景", "covers": "c", "visual": "", "lines": 6, "chars": 100}]
+    good = _chapter("context", [
+        _line("explainer", "太陽の光は", ["clear", "sun slot=sky name=sun"]),
+        _line("explainer", "地面に当たる", ["earth_arc slot=floor name=earth"]),
+        _line("listener", "それで？", ["arrow from=sun to=ghost"]),
+        _line("explainer", "跳ね返るのだ", ["arrow from=sun to=earth.top"]),
+        _line("explainer", "つまり寒くなるのだ", ["label 寒い at=top"]),
+        _line("listener", "なるほど", ["hold"]),
+    ])
+    stub = _chapter("context", [_line("explainer", "placeholder", ["clear"])])
+    client = FakeClient({"context": [good, stub, stub]})
+    chapter, problems, _ = script_stage.write_chapter(client, ["sys"], plan, 0, [], Canvas(), set(), idea_id=1, rounds=2)
+    assert chapter is not None and len(chapter.lines) == 6
+    assert any("ghost" in p for p in problems)
+    assert chapter.lines[2].broken and not chapter.lines[3].broken
+    assert len(client.calls) == 3            # the stub bought one extra round
+
+
+def test_model_habits_resolve():
+    from tube_auto.canvas import Canvas, dsl
+
+    c = Canvas()
+    for l in ["chain nodes=甲:0.2:0.2|乙:0.8:0.8 edges=0-1", "highlight target=chain",
+              "table columns=A|B rows=速い|遅い;近い|遠い", "highlight target=table",
+              "label text=x at=遅い", "label text=y at=r2c2 side=below",
+              "scatter slot=left name=sc points=0.1:0.2|0.9:0.8", "label text=近い at=sc.p1",
+              "concept slot=right text=密 name=dense", "label text=濃い at=dense below"]:
+        c.apply(dsl.parse(l))
+    assert c.state.items[-1].props["at"] == "dense"

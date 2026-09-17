@@ -399,7 +399,6 @@ REQUIRED_FIGURES: dict[str, set[str]] = {
     "history": {"heading", "person", "telescope", "timeline"},
     "mechanism1": {"chain", "columns", "table", "scatter", "wave", "balance", "panel", "pie", "compare"},
     "mechanism2": {"chain", "columns", "table", "scatter", "wave", "balance", "panel", "pie", "compare"},
-    "replay": {"chain", "columns", "table", "scatter", "timeline", "pie", "earth_arc", "compare", "wave"},
 }
 
 # Katakana words of six or more that are everyday, not jargon, for the
@@ -800,32 +799,16 @@ def write_chapters(client, system: list[str], plan: list[dict[str, Any]], known_
     spent = 0.0
 
     for index, brief in enumerate(plan):
-        feedback = ""
-        chapter: Chapter | None = None
-        problems: list[str] = []
-        stage_items = [i.name for i in canvas.state.items if i.kind == "element"]
-        for round_no in range(rounds):
-            user = _chapter_prompt(plan, index, chapters, stage_items, feedback)
-            try:
-                response = client.call_tool(system=system, user=user, tool=CHAPTER_TOOL, max_tokens=12000)
-            except Exception as exc:  # noqa: BLE001 - reported, the run moves on
-                return None, [f"{brief['key']}: {exc}"], spent
-            spent += response.cost_usd
-            if record:
+        chapter, problems, cost = write_chapter(client, system, plan, index, chapters, canvas, known_refs,
+                                                idea_id, rounds)
+        spent += cost
+        if record:
+            for response in _last_responses:
                 record(response)
-            chapter = _parse_chapter(response.payload, brief)
-            scratch = copy.deepcopy(canvas)
-            problems = check_chapter(chapter, brief, scratch, known_refs)
-            if not problems:
-                canvas = scratch
-                break
-            _dump_rejected(idea_id, round_no, response, problems, suffix=brief["key"])
-            log.warning("idea %d %s round %d: %s", idea_id, brief["key"], round_no + 1, "; ".join(problems[:4]))
-            feedback = _feedback(problems)
-        else:
-            # out of rounds: keep the chapter, drop what does not render
-            if chapter is None or not chapter.lines:
-                return None, [f"{brief['key']}: 台詞が書けなかった"], spent
+        if chapter is None:
+            return None, problems, spent
+        if problems:
+            # out of rounds: keep the best attempt, drop what does not render
             dropped = 0
             for line in chapter.lines:
                 if getattr(line, "broken", False):
@@ -841,6 +824,10 @@ def write_chapters(client, system: list[str], plan: list[dict[str, Any]], known_
                         line.ops = [{"op": "hold"}]
                         break
             notes.append(f"{brief['key']}: {len(problems)} 件を残して採用（板書を落とした行 {dropped}）: " + "; ".join(problems[:3]))
+        else:
+            for line in chapter.lines:
+                for op in line.ops:
+                    canvas.apply(op)
         chapters.append(chapter)
         if index == 0:
             hooks = [h for h in chapter.hooks if h.strip()][:3]
@@ -854,6 +841,128 @@ def write_chapters(client, system: list[str], plan: list[dict[str, Any]], known_
         hooks += [chapters[0].lines[0].display] * (3 - len(hooks))
         script.hooks = hooks
     return script, notes, spent
+
+
+_last_responses: list = []
+
+
+def write_chapter(client, system: list[str], plan: list[dict[str, Any]], index: int, previous: list[Chapter],
+                  canvas: Canvas, known_refs: set[str], idea_id: int, rounds: int = 2
+                  ) -> tuple[Chapter | None, list[str], float]:
+    """One chapter, up to `rounds` attempts with feedback, best attempt kept.
+
+    The best attempt is the one with the fewest problems among those that
+    are not stubs (a model that has been corrected twice sometimes answers
+    with one placeholder line; that is never the one to keep). Returns the
+    chapter, its remaining problems (empty when clean), and the cost. The
+    canvas is not modified; the caller applies the chosen chapter.
+    """
+    brief = plan[index]
+    wanted = int(brief.get("lines", 10))
+    stage_items = [i.name for i in canvas.state.items if i.kind == "element"]
+    feedback = ""
+    candidates: list[tuple[int, int, Chapter, list[str]]] = []
+    spent = 0.0
+    _last_responses.clear()
+    extra = 0
+    round_no = 0
+    while round_no < rounds + extra:
+        user = _chapter_prompt(plan, index, previous, stage_items, feedback)
+        try:
+            response = client.call_tool(system=system, user=user, tool=CHAPTER_TOOL, max_tokens=12000)
+        except Exception as exc:  # noqa: BLE001 - reported, the run moves on
+            return None, [f"{brief['key']}: {exc}"], spent
+        spent += response.cost_usd
+        _last_responses.append(response)
+        chapter = _parse_chapter(response.payload, brief)
+        problems = check_chapter(chapter, brief, copy.deepcopy(canvas), known_refs)
+        if not problems:
+            return chapter, [], spent
+        _dump_rejected(idea_id, round_no, response, problems, suffix=brief["key"])
+        log.warning("idea %d %s round %d: %s", idea_id, brief["key"], round_no + 1, "; ".join(problems[:4]))
+        stub = len(chapter.lines) < max(2, wanted * 0.4)
+        if stub and extra == 0:
+            extra = 1                      # one more go; a stub is not an answer
+            feedback = _feedback(problems) + "\n（前回は台詞がほとんど無かった。章全体を書くこと）"
+        else:
+            feedback = _feedback(problems)
+        if not stub:
+            candidates.append((len(problems), -len(chapter.lines), chapter, problems))
+        round_no += 1
+    if not candidates:
+        return None, [f"{brief['key']}: 台詞が書けなかった"], spent
+    candidates.sort(key=lambda c: (c[0], c[1]))
+    _, _, best, problems = candidates[0]
+    # re-check the best against the real stage so its lines carry `broken`
+    check_chapter(best, brief, copy.deepcopy(canvas), known_refs)
+    return best, problems, spent
+
+
+def rewrite_chapter(idea_id: int, key: str, rounds: int | None = None) -> tuple[Script, list[str], float]:
+    """Regenerate one chapter of a stored script and store the result.
+
+    For the case the first run showed: eight chapters fine, one a stub.
+    Rewriting the whole script for that costs nine calls; this costs one
+    to three. Earlier chapters are replayed on the stage so references
+    resolve the same way they did the first time.
+    """
+    settings = config.load_settings()
+    llm_cfg = settings.get("llm", {})
+    target_chars = brand_mod.target_chars(float(settings.get("video", {}).get("target_minutes", 15)))
+    brand = brand_mod.load_brand()
+    rounds = rounds or int(settings.get("pipeline", {}).get("max_retries_per_idea", 2))
+    client = LLMClient(model=llm_cfg.get("script_model", "claude-sonnet-5"),
+                       max_tokens=int(llm_cfg.get("max_tokens", 16000)))
+
+    with db.session() as conn:
+        idea = db.get_idea(conn, idea_id)
+        row = db.get_script(conn, idea_id)
+        if idea is None or row is None:
+            raise ValueError(f"idea {idea_id} has no script to rewrite")
+        chapters = [Chapter.from_dict(c) for c in json.loads(row["chapters_json"])]
+        hooks = json.loads(row["hooks_json"] or "[]")
+        sources = [dict(s) for s in db.get_sources(conn, idea_id)]
+        known_refs = {s["ref"] for s in sources}
+        theme = config.theme_by_id(idea["series_id"])
+        plan = _chapter_plan(_research_plan(idea), target_chars)
+        keys = [c["key"] for c in plan]
+        if key not in keys:
+            raise ValueError(f"no chapter {key!r}; one of {keys}")
+        index = keys.index(key)
+        system = [_system_prompt(brand, theme, target_chars), _sources_block(idea, sources)]
+
+        canvas = Canvas()
+        for chapter in chapters[:index]:
+            for line in chapter.lines:
+                for op in line.ops or []:
+                    try:
+                        canvas.apply(op)
+                    except CanvasError:
+                        break
+        chapter, problems, spent = write_chapter(client, system, plan, index, chapters[:index], canvas,
+                                                 known_refs, idea_id, rounds)
+        for response in _last_responses:
+            _record_call(conn, response)
+        if chapter is None:
+            raise RuntimeError("; ".join(problems))
+        for line in chapter.lines:
+            if getattr(line, "broken", False):
+                line.ops, line.visual, line.dropped = [{"op": "hold"}], ["hold"], True
+        if index < len(chapters):
+            chapters[index] = chapter
+        else:
+            chapters.append(chapter)
+        if index == 0 and chapter.hooks:
+            hooks = [h for h in chapter.hooks if h.strip()][:3] or hooks
+        script = Script(chapters=chapters, hooks=hooks)
+        db.upsert_script(conn, idea_id=idea_id, chapters=script.as_dicts(), hooks=script.hooks,
+                         char_count=script.char_count, model=client.model)
+        # the old narration no longer matches the script
+        conn.execute("DELETE FROM narrations WHERE idea_id = ?", (idea_id,))
+        db.set_idea_status(conn, idea_id, "scripted")
+        conn.commit()
+        write_preview(script, idea_id)
+    return script, problems, spent
 
 
 def _parse_chapter(payload: dict[str, Any], brief: dict[str, Any]) -> Chapter:
