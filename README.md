@@ -46,17 +46,114 @@
 ## セットアップ
 
 ```bash
-sudo apt-get install -y ffmpeg fonts-noto-cjk   # 合成とCJK字幕に必須
+sudo apt-get install -y ffmpeg fonts-noto-cjk fonts-mplus   # 合成・CJK字幕・図の文字に必須
 pip install -e ".[dev,review]"
 cp .env.example .env                            # ANTHROPIC_API_KEY を記入
-gcloud auth application-default login           # ナレーション（TTSはキーではなくADC認証）
 tube-auto init
 tube-auto doctor                                # 何が足りないか一覧で出る
 ```
 
-`tube-auto doctor` は、ツール・APIキー・ADC・OAuthトークン・設定の整合・今月の支出・価格表の鮮度・
-**TTS無料枠の消費率**・NASA APIの到達性・止まっている工程を一度に診断します。
+ナレーションは既定で **VOICEVOX（ずんだもん／四国めたん、ローカル・無料）** を使うので、
+これだけならAPIキーもGoogle認証も要りません。VOICEVOXエンジンの用意は次の章。
+Google Cloud TTSをフォールバックとして使う場合だけ、別途
+`gcloud auth application-default login` が要ります（`config/settings.yaml` の `tts.provider: google`）。
+
+`tube-auto doctor` は、ツール・APIキー・**VOICEVOXエンジンの疎通と話者ID**・OAuthトークン・
+設定の整合・今月の支出・価格表の鮮度・NASA APIの到達性・止まっている工程を一度に診断します。
 **キーを入れる前でも動く**ので、まずこれを実行してください。
+
+## 初回セットアップ（Windows + WSL2 + VOICEVOX）
+
+生成PC（RTX/RXどちらでもよい。VOICEVOXはCPU版を使うのでGPUの種類は関係ない）を
+Windows上のWSL2で動かす場合の、PowerShellを開いた直後からの手順です。
+
+### 1. WSL2のUbuntuに入る
+
+PowerShellで:
+```powershell
+wsl
+```
+複数ディストリがある場合は `wsl -l -v` で名前を確認し `wsl -d Ubuntu` のように指定する。
+`wsl` 自体が見つからないと出た場合、それは**すでにWSL内にいる**（プロンプトが
+`user@HOST:~$` になっている）のに、もう一度呼び出そうとしている可能性が高い。
+その場合はそのまま次に進んでよい。
+
+### 2. リポジトリと依存パッケージ
+
+```bash
+cd ~
+git clone <このリポジトリのURL> Youtube-Shorts-Auto   # 既にあれば git pull
+cd Youtube-Shorts-Auto
+sudo apt update && sudo apt install -y ffmpeg fonts-noto-cjk fonts-mplus p7zip-full curl unzip
+pip install -e ".[dev,review]"
+cp .env.example .env   # ANTHROPIC_API_KEY を記入
+```
+
+### 3. VOICEVOXエンジン（Linux・CPU版 x64）を用意する
+
+**Windows版アプリではなく、Linux向けのビルドをWSL2内に置く。**
+WSL2からWindows版アプリのポートへ繋ぐ方法もあるが、ファイアウォールで弾かれやすく、
+Linux版を直接動かす方が確実。GPU版（NVIDIA/DirectML）は不要 ― CPU版で十分な速度が出る。
+
+1. https://github.com/VOICEVOX/voicevox_engine/releases を開き、最新の安定版
+   （`0.26.0-dev` のような prev/dev 版ではなく無印バージョン）を選ぶ。
+2. Assets一覧から **`voicevox_engine-linux-cpu-x64-<version>.7z.001`** を探す。
+   同名で `.7z.002` 以降が無ければ、この1ファイルで完結している。
+   （`arm64` ではなく `x64`。Windows用やmacOS用、GPU版は使わない）
+3. `gh` (GitHub CLI) が使えるなら一発で取れる:
+   ```bash
+   mkdir -p ~/voicevox_engine && cd ~/voicevox_engine
+   gh release download <version> --repo VOICEVOX/voicevox_engine \
+     --pattern "voicevox_engine-linux-cpu-x64-<version>.7z.001"
+   ```
+   使えない場合はブラウザでリンクをコピーして `curl -L -o voicevox_engine-linux-cpu-x64-<version>.7z.001 "<URL>"`。
+4. 展開する。**必ずWSL(Linux)側のターミナルで実行する** ―
+   Windowsのエクスプローラーや7-Zip GUIで `\\wsl.localhost\...` 越しに展開すると、
+   同梱されているシンボリックリンク（`libscipy_openblas64_*.so` 等）が壊れる。
+   ```bash
+   7z x voicevox_engine-linux-cpu-x64-*.7z.001
+   ```
+5. `run` の場所を確認し、実行権限を付ける:
+   ```bash
+   find ~/voicevox_engine -name run
+   chmod +x ~/voicevox_engine/linux-cpu-x64/run
+   ```
+   このパスが `config/settings.yaml` の `tts.voicevox.engine_dir`
+   （既定値 `~/voicevox_engine/linux-cpu-x64`）と一致していれば設定変更は不要。
+6. 起動確認（1回だけ手動で。以後は `tube-auto narrate` が自動起動・自動終了する）:
+   ```bash
+   cd ~/voicevox_engine/linux-cpu-x64
+   ./run --host 127.0.0.1 --port 50021
+   ```
+   初回はモデル読み込みで数十秒〜数分かかる。別ウィンドウで:
+   ```bash
+   curl http://127.0.0.1:50021/version
+   curl -s http://127.0.0.1:50021/speakers | \
+     python3 -c "import json,sys; [print(s['name'],[(st['name'],st['id']) for st in s['styles']]) for s in json.load(sys.stdin) if s['name'] in ('ずんだもん','四国めたん')]"
+   ```
+   `ずんだもん` にID 3、`四国めたん` にID 2の「ノーマル」があれば成功。確認できたら
+   `Ctrl+C` で止めてよい。
+
+### 4. 診断
+
+```bash
+tube-auto doctor
+```
+`VOICEVOX` の行が `OK` になっていれば準備完了。`sprites`（立ち絵）の `WARN` は
+素材未設置のあいだ出続けるが、無くても動画は作れる（丸いプレースホルダで代用される）。
+
+### 日々の起動（2回目以降）
+
+```powershell
+wsl
+```
+```bash
+cd ~/Youtube-Shorts-Auto
+git pull
+tube-auto status
+```
+VOICEVOXエンジンは手動起動しなくてよい。`tts.voicevox.engine_dir` が設定済みなら
+`tube-auto narrate` の実行時に自動で起動し、終了時に自動で止まる。
 
 ### YouTube の OAuth
 
@@ -88,10 +185,9 @@ tube-auto build                    # research → assemble を通しで1本
 # ↑ を段階ごとに実行する場合:
 tube-auto research                 #   題材を選び、一次ソースを3〜5本束ねて S1..Sn を振る
 tube-auto script --idea 1          #   章立て台本。出典IDのない数値は差し戻される
-tube-auto narrate --idea 1         #   Chirp 3 HD で2話者合成（月100万文字まで無料）
-tube-auto footage --idea 1         #   NASA素材。利用条件5項目でフィルタ
-tube-auto diagrams --idea 1        #   matplotlib のアニメーション図解
-tube-auto assemble --idea 1        #   ffmpeg で合成（サムネイル3案もここで出る）
+tube-auto narrate --idea 1         #   VOICEVOX（ずんだもん/四国めたん）で2話者合成。無料
+tube-auto footage --idea 1         #   NASA静止画。章の背景に薄く敷く分だけ。利用条件5項目でフィルタ
+tube-auto assemble --idea 1        #   板書を行ごとに描画し、音声と合成（サムネイル3案もここで出る）
 tube-auto thumbnails --idea 1      #   サムネイルだけ作り直す
 
 streamlit run review_app.py        # ← 人間の承認ゲート。ここを通らないと投稿されない
