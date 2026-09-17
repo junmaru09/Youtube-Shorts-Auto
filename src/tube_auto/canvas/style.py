@@ -115,6 +115,25 @@ BOX_RADIUS = 10
 DIM_ALPHA = 130                    # the "title with dim" overlay
 HIGHLIGHT_WIDTH = 9
 
+# --- theme -----------------------------------------------------------------------
+#
+# "parchment" is the reference channel's look, kept for comparison.
+# "notebook" is this channel's: the stage is a page of squared notebook
+# paper (the channel is a 宇宙ノート), the section heading sits in an index
+# tab at the top-left, and the subtitle band is dark navy rather than
+# translucent white. The one rule — every mark outlined — is unchanged, so
+# figures read the same on either.
+THEME = "notebook"
+
+NOTEBOOK_PAPER = (247, 243, 232)
+NOTEBOOK_GRID = (200, 212, 228)
+NOTEBOOK_GRID_STEP = 60
+NOTEBOOK_MARGIN_LINE = (232, 150, 150)     # the red margin rule down the left
+TAB_FILL = (255, 213, 79)                  # the index tab behind the heading
+TAB_INK = (40, 36, 30)
+BAND_NAVY = (26, 30, 56)
+BAND_ALPHA_NAVY = 225
+
 # --- backgrounds ----------------------------------------------------------------
 
 PARCHMENT_BASE = (168, 148, 118)

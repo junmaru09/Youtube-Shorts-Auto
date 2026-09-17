@@ -569,6 +569,167 @@ def columns(d: ImageDraw.ImageDraw, box: Box, items: list[dict[str, Any]], **_: 
     return parts
 
 
+# --- the figures the first scripts reached for and did not have ---------------------
+
+
+def wave(d: ImageDraw.ImageDraw, box: Box, cycles: float = 4.0, colour: str = "cyan",
+         stretch: float = 1.0, **_: Any) -> Parts:
+    """A sine wave across the box: light, sound, redshift. `stretch` > 1
+    lengthens the wavelength (fewer cycles fit), which is how the reference
+    shows a redshifted photon next to a normal one."""
+    x0, y0, x1, y1 = box
+    cy = (y0 + y1) / 2
+    amp = min((y1 - y0) / 2 - 8, 60)
+    n = max(1.0, cycles / max(stretch, 0.1))
+    pts = []
+    steps = 160
+    for i in range(steps + 1):
+        t = i / steps
+        pts.append((x0 + (x1 - x0) * t, cy - amp * math.sin(2 * math.pi * n * t)))
+    fill = S.PALETTE.get(colour, S.CYAN)
+    d.line(pts, fill=S.INK, width=S.ARROW_WIDTH // 2 + S.OUTLINE_SHAPE, joint="curve")
+    d.line(pts, fill=fill, width=S.ARROW_WIDTH // 2, joint="curve")
+    return {"self": (x0, cy - amp, x1, cy + amp), "start": (x0 - 8, cy - 8, x0 + 8, cy + 8),
+            "end": (x1 - 8, cy - 8, x1 + 8, cy + 8)}
+
+
+def ladder(d: ImageDraw.ImageDraw, box: Box, rungs: list[str] | None = None, **_: Any) -> Parts:
+    """A ladder with a label per rung, bottom to top: the cosmic distance
+    ladder, a hierarchy, steps of an argument. Parts: each rung's label."""
+    rungs = rungs or ["近く", "中くらい", "遠く"]
+    box = _fit(box, 0.55)
+    x0, y0, x1, y1 = box
+    rail_w = 14
+    for rx in (x0 + 40, x1 - 40):
+        d.rectangle((rx - rail_w / 2 - 4, y0, rx + rail_w / 2 + 4, y1), fill=S.INK)
+        d.rectangle((rx - rail_w / 2, y0 + 4, rx + rail_w / 2, y1 - 4), fill=(230, 200, 140))
+    parts: Parts = {"self": box}
+    n = len(rungs)
+    for i, text in enumerate(rungs):
+        ry = y1 - (y1 - y0) * (i + 0.5) / n
+        d.rectangle((x0 + 40, ry - 11, x1 - 40, ry + 11), fill=S.INK)
+        d.rectangle((x0 + 44, ry - 7, x1 - 44, ry + 7), fill=(230, 200, 140))
+        outlined_text(d, ((x0 + x1) / 2, ry - 34), text, S.SIZE_LABEL_SMALL, S.WHITE)
+        tw, th = text_size(text, S.SIZE_LABEL_SMALL)
+        parts[text] = ((x0 + x1) / 2 - tw / 2, ry - 34 - th / 2, (x0 + x1) / 2 + tw / 2, ry - 34 + th / 2)
+    return parts
+
+
+def scatter(d: ImageDraw.ImageDraw, box: Box, points: list[dict[str, Any]] | None = None,
+            line: bool = True, colour: str = "yellow", x_label: str = "", y_label: str = "",
+            **_: Any) -> Parts:
+    """Points on two axes, with an optional fitted line: Hubble's diagram,
+    any "the further, the faster". Points are {"x", "y"} in 0..1, plus an
+    optional "label" and "colour". Parts: each labelled point, "origin"."""
+    x0, y0, x1, y1 = box
+    ox, oy = x0 + 90, y1 - 80
+    px1, py0 = x1 - 30, y0 + 30
+    arrow(d, (ox, oy), (px1, oy), S.WHITE, shaft=10, head=32)
+    arrow(d, (ox, oy), (ox, py0), S.WHITE, shaft=10, head=32)
+    if x_label:
+        outlined_text(d, ((ox + px1) / 2, oy + 40), x_label, S.SIZE_LABEL_SMALL, S.WHITE)
+    if y_label:
+        chars = [{"（": "︵", "）": "︶"}.get(c, c) for c in y_label]
+        for i, ch in enumerate(chars):
+            outlined_text(d, (ox - 44, py0 + 30 + i * 38), ch, S.SIZE_LABEL_SMALL - 4, S.WHITE)
+    pts = points or [{"x": 0.15, "y": 0.2}, {"x": 0.4, "y": 0.35}, {"x": 0.6, "y": 0.6}, {"x": 0.85, "y": 0.8}]
+    parts: Parts = {"self": box, "origin": (ox - 4, oy - 4, ox + 4, oy + 4)}
+    coords = [(ox + (px1 - ox) * float(p["x"]), oy - (oy - py0) * float(p["y"])) for p in pts]
+    if line and len(coords) >= 2:
+        # least squares through the points
+        n = len(coords)
+        mx = sum(c[0] for c in coords) / n
+        my = sum(c[1] for c in coords) / n
+        den = sum((c[0] - mx) ** 2 for c in coords) or 1.0
+        slope = sum((c[0] - mx) * (c[1] - my) for c in coords) / den
+        lx0, lx1 = ox + 20, px1 - 40
+        fit = S.PALETTE.get(colour, S.YELLOW)
+        d.line(((lx0, my + slope * (lx0 - mx)), (lx1, my + slope * (lx1 - mx))), fill=S.INK, width=14)
+        d.line(((lx0, my + slope * (lx0 - mx)), (lx1, my + slope * (lx1 - mx))), fill=fit, width=8)
+    for p, (cx, cy) in zip(pts, coords):
+        r = 14
+        filled_outlined(d, "ellipse", (cx - r, cy - r, cx + r, cy + r), S.PALETTE.get(p.get("colour", "white"), S.WHITE), width=4)
+        if p.get("label"):
+            outlined_text(d, (cx, cy - 34), str(p["label"]), S.SIZE_LABEL_SMALL - 6, S.WHITE)
+            parts[str(p["label"])] = (cx - r, cy - r, cx + r, cy + r)
+    return parts
+
+
+def balance(d: ImageDraw.ImageDraw, box: Box, left: str = "", right: str = "", tilt: float = 0.0,
+            **_: Any) -> Parts:
+    """A beam balance. `tilt` from -1 (left pan down) to 1 (right pan down).
+    Parts: "left", "right" (the pans)."""
+    box = _fit(box, 1.4)
+    x0, y0, x1, y1 = box
+    cx = (x0 + x1) / 2
+    base_y = y1 - 20
+    top_y = y0 + 40
+    # pillar and foot
+    d.polygon([(cx - 60, base_y), (cx + 60, base_y), (cx + 10, top_y), (cx - 10, top_y)], fill=S.INK)
+    d.polygon([(cx - 52, base_y - 4), (cx + 52, base_y - 4), (cx + 7, top_y + 4), (cx - 7, top_y + 4)], fill=(200, 200, 210))
+    half = (x1 - x0) / 2 - 40
+    drop = tilt * 50
+    lx, ly = cx - half, top_y + drop * -1
+    rx, ry = cx + half, top_y + drop
+    d.line(((lx, ly), (rx, ry)), fill=S.INK, width=20)
+    d.line(((lx, ly), (rx, ry)), fill=(200, 200, 210), width=12)
+    parts: Parts = {"self": box}
+    for name, px, py, text in (("left", lx, ly, left), ("right", rx, ry, right)):
+        pan_y = py + 90
+        for ex in (-40, 40):
+            d.line(((px, py), (px + ex, pan_y)), fill=S.INK, width=5)
+        filled_outlined(d, "ellipse", (px - 70, pan_y - 14, px + 70, pan_y + 14), (200, 200, 210), width=5)
+        if text:
+            outlined_text(d, (px, pan_y - 44), text, S.SIZE_LABEL_SMALL, S.WHITE)
+        parts[name] = (px - 70, pan_y - 60, px + 70, pan_y + 14)
+    return parts
+
+
+def telescope(d: ImageDraw.ImageDraw, box: Box, colour: str = "grey", **_: Any) -> Parts:
+    """A telescope on a tripod, pointing up-right. Parts: "lens"."""
+    box = _fit(box, 1.0)
+    x0, y0, x1, y1 = box
+    w = x1 - x0
+    cx, cy = (x0 + x1) / 2, y0 + (y1 - y0) * 0.45
+    # tube: a rotated rectangle drawn as a polygon
+    ang = math.radians(-35)
+    ux, uy = math.cos(ang), math.sin(ang)
+    nx, ny = -uy, ux
+    L, R = w * 0.42, w * 0.11
+    pts = [(cx - ux * L + nx * R, cy - uy * L + ny * R), (cx + ux * L + nx * R * 1.3, cy + uy * L + ny * R * 1.3),
+           (cx + ux * L - nx * R * 1.3, cy + uy * L - ny * R * 1.3), (cx - ux * L - nx * R, cy - uy * L - ny * R)]
+    polygon_outlined(d, pts, S.PALETTE.get(colour, S.GREY))
+    for leg in (-1, 0, 1):
+        d.line(((cx, cy + 10), (cx + leg * w * 0.28, y1 - 6)), fill=S.INK, width=12)
+        d.line(((cx, cy + 10), (cx + leg * w * 0.28, y1 - 6)), fill=(120, 120, 130), width=6)
+    lens = (cx + ux * L, cy + uy * L)
+    return {"self": box, "lens": (lens[0] - 10, lens[1] - 10, lens[0] + 10, lens[1] + 10)}
+
+
+def person(d: ImageDraw.ImageDraw, box: Box, colour: str = "white", label: str = "", **_: Any) -> Parts:
+    """A simple standing figure (head, body, arms, legs) with an optional
+    label underneath: the observer, the scientist, "someone on Earth"."""
+    box = _fit(box, 0.5)
+    x0, y0, x1, y1 = box
+    cx = (x0 + x1) / 2
+    name = label
+    h = y1 - y0 - (60 if name else 0)
+    r = h * 0.14
+    fill = S.PALETTE.get(colour, S.WHITE)
+    filled_outlined(d, "ellipse", (cx - r, y0, cx + r, y0 + 2 * r), fill)
+    body_top, body_bot = y0 + 2 * r + 6, y0 + h * 0.66
+    filled_outlined(d, "rounded", (cx - r * 0.9, body_top, cx + r * 0.9, body_bot), fill, radius=int(r * 0.5))
+    for sx in (-1, 1):
+        d.line(((cx + sx * r * 0.9, body_top + 10), (cx + sx * r * 1.9, body_top + h * 0.3)), fill=S.INK, width=int(r * 0.5) + 6)
+        d.line(((cx + sx * r * 0.9, body_top + 10), (cx + sx * r * 1.9, body_top + h * 0.3)), fill=fill, width=int(r * 0.5))
+        d.line(((cx + sx * r * 0.4, body_bot), (cx + sx * r * 0.7, y0 + h)), fill=S.INK, width=int(r * 0.6) + 6)
+        d.line(((cx + sx * r * 0.4, body_bot), (cx + sx * r * 0.7, y0 + h)), fill=fill, width=int(r * 0.6))
+    parts: Parts = {"self": box, "head": (cx - r, y0, cx + r, y0 + 2 * r)}
+    if name:
+        outlined_text(d, (cx, y1 - 26), name, S.SIZE_LABEL_SMALL, S.WHITE)
+    return parts
+
+
 def concept(d: ImageDraw.ImageDraw, box: Box, text: str = "", **_: Any) -> Parts:
     """A word in a box: the stand-in for an idea that has no picture
     ("測り方A" / "測り方B"). Same look as box_row's boxes."""
@@ -592,4 +753,5 @@ REGISTRY = {
     "ice_block": ice_block, "cloud": cloud, "atom": atom, "charge": charge,
     "pie": pie, "box_row": box_row, "timeline": timeline, "number_line": number_line,
     "table": table, "chain": chain, "grid_panel": grid_panel, "columns": columns, "concept": concept,
+    "wave": wave, "ladder": ladder, "scatter": scatter, "balance": balance, "telescope": telescope, "person": person,
 }

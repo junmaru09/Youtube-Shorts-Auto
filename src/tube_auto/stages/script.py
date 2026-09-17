@@ -22,6 +22,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -197,7 +198,9 @@ def _system_prompt(brand: brand_mod.Brand, theme, target_chars: int) -> str:
 - 1行は1〜2文、字幕は30字×2行に収まる長さ（display は60字以内が目安、72字まで）。最後の行は「{brand.closing_line}」。
 
 冒頭（opener）の型。何も知らない人が「見てみよう」と思う入り方にする:
-- 本題の名前も、論文も、数字も、専門用語も出さない。listener の身近な体験から始める。
+- 本題の名前も、論文も、数字も、専門用語も出さない。**最初の行は listener** で、身近な体験から始める。
+- 入り方は3種類のどれか: (a) 体験「昨日〜したんだけど」 (b) 日常の違和感「〜っておかしくない？」
+  (c) 思い込みの反転「〜って当たり前よね？」→ explainer「実は違うのだ」。
 - 手本（テーマが「空はなぜ青いか」なら）:
     listener: 「今日海に行ってきたんだけど、めっちゃ青くてきれいだったわ」
     listener: 「あれ、でも水って透明よね？ なんで海は青く見えるのかしら」
@@ -388,6 +391,11 @@ LISTENER_SHARE = (0.15, 0.50)
 MAX_HOLD_RUN = 3
 MAX_HOLD_RUN_ROOM = 5
 ROOM_CHAPTERS = {"opener", "close"}
+# Katakana words of six or more that are everyday, not jargon, for the
+# opener check.
+OPENER_OK_KATAKANA = {"インターネット", "スマートフォン", "コンビニ", "テレビ", "ニュース", "アイスクリーム",
+                      "エアコン", "コーヒー", "チョコレート", "プラネタリウム", "ペットボトル"}
+
 # A subtitle is two rows of SUBTITLE_WRAP characters. Longer lines overflow
 # the band, and a line that long is a paragraph anyway.
 MAX_DISPLAY_CHARS = 72
@@ -511,6 +519,17 @@ def check_chapter(chapter: Chapter, brief: dict[str, Any], canvas: Canvas, known
         problems.append(f"{len(report.uncited)} 行が数値を出典なしで述べている: " + "; ".join(u[:30] for u in report.uncited[:3]))
     if report.unknown_refs:
         problems.append(f"存在しない出典ID: {sorted(set(report.unknown_refs))}")
+
+    if chapter.key == "opener":
+        first = chapter.lines[0]
+        if first.speaker != "listener":
+            problems.append("opener の最初の行は listener の身近な一言から始めること")
+        for li, line in enumerate(chapter.lines[:3]):
+            jargon = [w for w in re.findall(r"[ァ-ヴー]{6,}", line.display) if w not in OPENER_OK_KATAKANA]
+            if re.search(r"\d", line.display) or jargon:
+                problems.append(f"opener:{li + 1}「{line.display[:14]}」 に数字や専門語（{', '.join(jargon) or '数字'}）がある。"
+                                "冒頭3行は中学生の言葉だけで")
+                break
 
     if brief.get("ends_with_question"):
         tail = [line.display for line in chapter.lines[-2:]]

@@ -431,6 +431,22 @@ def parchment(width: int = S.WIDTH, height: int = S.HEIGHT, seed: int = 0) -> Im
     return Image.composite(paper, edge, vig)
 
 
+def notebook(width: int = S.WIDTH, height: int = S.HEIGHT, seed: int = 0) -> Image.Image:
+    """Squared notebook paper: cream, a faint blue grid, a red margin rule,
+    a little grain so it is not a flat fill. The channel's own page."""
+    img = Image.new("RGB", (width, height), S.NOTEBOOK_PAPER)
+    d = ImageDraw.Draw(img)
+    step = S.NOTEBOOK_GRID_STEP
+    for x in range(step, width, step):
+        d.line((x, 0, x, height), fill=S.NOTEBOOK_GRID, width=1)
+    for y in range(step, height, step):
+        d.line((0, y, width, y), fill=S.NOTEBOOK_GRID, width=1)
+    d.line((step * 2 + 20, 0, step * 2 + 20, height), fill=S.NOTEBOOK_MARGIN_LINE, width=3)
+    grain = Image.effect_noise((width, height), 10).convert("L")
+    img = Image.blend(img, Image.merge("RGB", (grain, grain, grain)).point(lambda v: 200 + v // 5), 0.08)
+    return img
+
+
 def starfield(width: int = S.WIDTH, height: int = S.HEIGHT, seed: int = 0, stars: int = 900) -> Image.Image:
     """A dark sky with faint stars: the stand-in for a space photo until the
     asset library has one. Dark enough for white grid lines to read."""

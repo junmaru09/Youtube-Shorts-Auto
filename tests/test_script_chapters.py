@@ -128,3 +128,22 @@ def test_preview_sheet_is_written(tmp_path, monkeypatch):
     script, _, _ = script_stage.write_chapters(client, ["sys"], PLAN, set(), idea_id=7)
     path = script_stage.write_preview(script, 7)
     assert path is not None and path.exists() and path.name == "script_idea00007_preview.png"
+
+
+def test_opener_must_start_plain_and_with_the_listener():
+    from tube_auto.canvas import Canvas
+    from tube_auto.models import Chapter, Line
+
+    def ch(first_speaker, first_text):
+        return Chapter(key="opener", title="t", lines=[
+            Line(first_speaker, first_text, first_text, visual=["clear"]),
+            Line("explainer", "実は違うのだ", "実は違うのだ", visual=["label x at=top"]),
+            Line("listener", "どういうこと？", "どういうこと？", visual=["hold"]),
+        ])
+    brief = {"key": "opener", "lines": 3, "ends_with_question": True}
+    assert not script_stage.check_chapter(ch("listener", "昨日、海に行ったの"), brief, Canvas(), set())
+    problems = script_stage.check_chapter(ch("explainer", "ハッブル定数の話なのだ"), brief, Canvas(), set())
+    assert any("listener" in p for p in problems)
+    problems = script_stage.check_chapter(ch("listener", "ダークエネルギーって知ってる？"), brief, Canvas(), set())
+    assert any("専門語" in p for p in problems)
+    assert not script_stage.check_chapter(ch("listener", "コンビニでアイスクリーム買ったの"), brief, Canvas(), set())

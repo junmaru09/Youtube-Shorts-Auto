@@ -44,6 +44,8 @@ _LIST_KEYS: dict[str, Any] = {
     "bands": ("from", "to", "colour", "name"),
     "nodes": ("text", "x", "y", "colour", "size"),
     "markers": ("at", "label", "colour", "side"),
+    "points": ("x", "y", "label", "colour"),
+    "rungs": str,
     "edges": "edge",
     "span": "numbers",
     "box": "numbers",

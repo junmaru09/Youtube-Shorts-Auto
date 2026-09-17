@@ -496,8 +496,8 @@ class Canvas:
                 img = D.dimmed_photo(Image.open(photo))
             elif st.background == "space" and not (self.assets and self.assets.background("space")):
                 img = D.starfield(seed=self.seed)
-            elif st.background == "parchment" or not self.assets or not self.assets.background(st.background):
-                img = D.parchment(seed=self.seed)
+            elif st.background in ("parchment", "paper", "notebook") or not self.assets or not self.assets.background(st.background):
+                img = D.notebook(seed=self.seed) if S.THEME == "notebook" else D.parchment(seed=self.seed)
             else:
                 img = D.dimmed_photo(Image.open(self.assets.background(st.background)),
                                      factor=1.0 if st.background == "room" else S.PHOTO_DIM)
@@ -544,7 +544,17 @@ class Canvas:
 
         if st.heading:
             colour = S.PALETTE[st.heading_style.get("colour", "white")]
-            if st.heading_style.get("align") == "left":
+            if S.THEME == "notebook":
+                # an index tab: yellow, dark text, hanging from the page's top edge
+                tw, th = D.text_size(st.heading, S.SIZE_HEADING)
+                x0 = S.STAGE_LEFT          # clear of the sun's corner
+                tab = (x0, 0, x0 + tw + 80, S.HEADING_Y + th / 2 + 14)
+                d.rounded_rectangle(tab, radius=16, fill=S.INK)
+                d.rounded_rectangle((tab[0] + 4, tab[1] - 20, tab[2] - 4, tab[3] - 4), radius=14,
+                                    fill=S.TAB_FILL if colour == S.WHITE else colour)
+                D.outlined_text(d, (x0 + 40, S.HEADING_Y), st.heading, S.SIZE_HEADING, S.TAB_INK,
+                                anchor="lm", outline=S.TAB_FILL if colour == S.WHITE else colour, width=0)
+            elif st.heading_style.get("align") == "left":
                 D.outlined_text(d, (S.STAGE_FULL_LEFT + 40, S.HEADING_Y), st.heading, S.SIZE_HEADING, colour, anchor="lm")
             else:
                 D.outlined_text(d, ((S.STAGE_LEFT + S.STAGE_RIGHT) / 2, S.HEADING_Y), st.heading, S.SIZE_HEADING, colour)
@@ -697,8 +707,13 @@ def wrap_subtitle(text: str, width: int = S.SUBTITLE_WRAP) -> list[str]:
 
 
 def _subtitle_band(img: Image.Image, text: str, speaker: str) -> None:
-    band = Image.new("RGBA", (S.WIDTH, S.HEIGHT - S.BAND_TOP), (255, 255, 255, 150))
-    img.paste(band, (0, S.BAND_TOP), band)
+    if S.THEME == "notebook":
+        band = Image.new("RGBA", (S.WIDTH, S.HEIGHT - S.BAND_TOP), (*S.BAND_NAVY, S.BAND_ALPHA_NAVY))
+        img.paste(band, (0, S.BAND_TOP), band)
+        ImageDraw.Draw(img).line((0, S.BAND_TOP, S.WIDTH, S.BAND_TOP), fill=S.TAB_FILL, width=4)
+    else:
+        band = Image.new("RGBA", (S.WIDTH, S.HEIGHT - S.BAND_TOP), (255, 255, 255, 150))
+        img.paste(band, (0, S.BAND_TOP), band)
     if not text:
         return
     d = ImageDraw.Draw(img)

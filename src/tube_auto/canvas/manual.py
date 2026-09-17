@@ -47,7 +47,9 @@ VISUAL_MANUAL = f"""\
 
 ### 要素（`<要素名> slot=… name=…` で置く）
 - 天体: sun, earth_globe [ice=true], earth_arc [colour=green|orange], moon, galaxy, black_blob, star_dots
-- 物: ice_block, cloud, atom [electrons=2], charge [sign=+|-]
+- 物: ice_block, cloud, atom [electrons=2], charge [sign=+|-], telescope, person [label=…], balance [left=… right=… tilt=-1..1]
+- 概念: concept text=…（言葉だけを箱に）, wave [cycles=4 stretch=1.6 colour=]（光・音・赤方偏移。stretch で波長が伸びる）,
+  ladder rungs=近く|中|遠く（距離はしご・段階）, scatter points=x:y[:ラベル]|… [x_label= y_label= line=true]（点と直線のグラフ）
 - 構造図:
   - pie slices=名前:値:色[:注記]|…  [centre_label=…]   部位=各名前
   - box_row items=語|語|…                              部位=各語
