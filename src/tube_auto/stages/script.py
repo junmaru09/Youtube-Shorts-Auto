@@ -377,7 +377,13 @@ def validate(script: Script, known_refs: set[str], target_chars: int,
         )
 
     actual = script.char_count
-    if abs(actual - target_chars) > target_chars * LENGTH_TOLERANCE:
+    lines_total = sum(len(c.lines) for c in script.chapters)
+    if lines_total == 0:
+        problems.append(
+            f"{len(script.chapters)} 章あるが lines が全部空。各章の lines に台詞を書くこと"
+            "（章の骨組みだけの提出は受け付けない）"
+        )
+    elif abs(actual - target_chars) > target_chars * LENGTH_TOLERANCE:
         minutes = actual / 400
         lines = sum(len(c.lines) for c in script.chapters)
         per_line = actual / lines if lines else 0
@@ -457,39 +463,49 @@ def run(
             known_refs = {s["ref"] for s in sources}
             theme = config.theme_by_id(idea["series_id"])
             plan = _chapter_plan(_research_plan(idea), target_chars)
+            system = _system_prompt(brand, theme, target_chars)
+            user = _user_prompt(idea, sources, plan, target_chars)
 
-            try:
-                response = client.call_tool(
-                    system=_system_prompt(brand, theme, target_chars),
-                    user=_user_prompt(idea, sources, plan, target_chars),
-                    tool=SCRIPT_TOOL,
-                )
-            except Exception as exc:  # noqa: BLE001 - one idea must not kill the run
-                log.error("script generation failed for idea %d: %s", current_id, exc)
-                result.rejected += 1
-                result.errors.append(f"idea {current_id}: {exc}")
-                continue
+            # A rejected script is sent back with its problems, up to the
+            # retry cap, in this same run. Most rejections are one fixable
+            # thing — a broken visual reference, a chapter that forgot to end
+            # on a question — and the model fixes them when told; without the
+            # feedback it just writes another script with different mistakes.
+            script = None
+            problems: list[str] = []
+            feedback = ""
+            for round_no in range(max_retries - int(idea["attempts"])):
+                try:
+                    response = client.call_tool(system=system, user=user + feedback, tool=SCRIPT_TOOL)
+                except Exception as exc:  # noqa: BLE001 - one idea must not kill the run
+                    log.error("script generation failed for idea %d: %s", current_id, exc)
+                    problems = [str(exc)]
+                    break
 
-            if response.cost_usd:
-                db.insert_llm_call(
-                    conn,
-                    purpose="script",
-                    model=response.model,
-                    input_tokens=response.input_tokens,
-                    output_tokens=response.output_tokens,
-                    cost_usd=response.cost_usd,
-                )
-                conn.commit()
-                result.llm_cost_usd += response.cost_usd
+                if response.cost_usd:
+                    db.insert_llm_call(
+                        conn, purpose="script", model=response.model,
+                        input_tokens=response.input_tokens, output_tokens=response.output_tokens,
+                        cost_usd=response.cost_usd,
+                    )
+                    conn.commit()
+                    result.llm_cost_usd += response.cost_usd
 
-            script = _parse(response.payload)
-            problems = validate(script, known_refs, target_chars, plan)
-            if problems:
-                log.error("idea %d rejected: %s", current_id, "; ".join(problems))
-                result.rejected += 1
-                result.errors.append(f"idea {current_id}: " + "; ".join(problems))
+                script = _parse(response.payload)
+                problems = validate(script, known_refs, target_chars, plan)
+                if not problems:
+                    break
+                dump = _dump_rejected(current_id, round_no, response, problems)
+                log.error("idea %d rejected (round %d, %d output tokens, stop=%s): %s — raw payload in %s",
+                          current_id, round_no + 1, response.output_tokens, response.stop_reason,
+                          "; ".join(problems), dump)
                 db.bump_attempts(conn, current_id)
                 conn.commit()
+                feedback = _feedback(problems)
+
+            if problems or script is None:
+                result.rejected += 1
+                result.errors.append(f"idea {current_id}: " + "; ".join(problems))
                 continue
 
             if dry_run:
@@ -521,6 +537,32 @@ def run(
             )
 
     return result
+
+
+def _feedback(problems: list[str]) -> str:
+    return (
+        "\n\n前回の提出は次の理由で差し戻されました。全部直して、台本全体をもう一度提出してください:\n"
+        + "\n".join(f"- {p}" for p in problems)
+    )
+
+
+def _dump_rejected(idea_id: int, round_no: int, response, problems: list[str]):
+    """Keep the raw payload of a rejected script, so a rejection can be read
+    rather than guessed at. Cheap insurance: the call already cost money."""
+    from .. import paths
+
+    folder = paths.WORK_DIR / "logs"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"script_rejected_idea{idea_id:05d}_round{round_no + 1}.json"
+    path.write_text(json.dumps({
+        "problems": problems,
+        "stop_reason": response.stop_reason,
+        "input_tokens": response.input_tokens,
+        "output_tokens": response.output_tokens,
+        "raw_text": response.raw_text,
+        "payload": response.payload,
+    }, ensure_ascii=False, indent=1), encoding="utf-8")
+    return path
 
 
 def _research_plan(idea) -> list[dict[str, Any]] | None:
