@@ -19,6 +19,7 @@ narration line and holds it for that line's duration.
 from __future__ import annotations
 
 import copy
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -178,7 +179,7 @@ class State:
 OPS = (
     "hold", "clear", "place", "add", "label", "arrow", "strike", "highlight",
     "list_add", "title", "heading", "background", "compare", "tiles", "table",
-    "chain", "zoom", "panel", "expression", "dim", "columns",
+    "chain", "zoom", "panel", "expression", "dim", "columns", "steps", "cycle", "stack",
 )
 
 
@@ -260,6 +261,98 @@ class Canvas:
         if colour not in S.PALETTE:
             raise CanvasError(f"unknown colour {colour!r}; one of {sorted(S.PALETTE)}")
         self.state.heading_style = {"colour": colour, "align": op.get("align", "center")}
+
+    # --- picture layouts: illustrations arranged, not words ----------------------
+    #
+    # `items` are name:caption pairs; the name is an illustration (or a drawn
+    # element). These are what the script should reach for where it used to
+    # write a list of labels.
+
+    def _picture_items(self, op: dict[str, Any]) -> list[dict[str, str]]:
+        items = []
+        for entry in op.get("items", []):
+            if isinstance(entry, dict):
+                name, caption = str(entry.get("title", "")), str(entry.get("text", ""))
+            else:
+                name, _, caption = str(entry).partition(":")
+            name = name.strip()
+            if name not in E.REGISTRY and not (self.assets and self.assets.has(name)):
+                raise CanvasError(f"steps/cycle/stack: no picture named {name!r}")
+            items.append({"name": name, "caption": caption.strip()})
+        if not items:
+            raise CanvasError("steps/cycle/stack need items=picture:caption|…")
+        return items
+
+    def _place_picture(self, name: str, box: Box, item_name: str) -> Item:
+        item = Item(item_name, "element", box, {"element": name, "size": "fit"})
+        self._register(item)
+        return item
+
+    def _op_steps(self, op: dict[str, Any]) -> None:
+        """Pictures in a row with numbers, arrows between: a process."""
+        items = self._picture_items(op)
+        x0, y0, x1, y1 = SLOTS.get(op.get("slot", "wide"), SLOTS["wide"])
+        n = len(items)
+        cell = (x1 - x0) / n
+        size = min(cell * 0.62, (y1 - y0) * 0.62, 320)
+        prefix = self._name(op, "steps")
+        prev: Item | None = None
+        for i, entry in enumerate(items):
+            cx = x0 + cell * (i + 0.5)
+            cy = (y0 + y1) / 2 - 30
+            box = (cx - size / 2, cy - size / 2, cx + size / 2, cy + size / 2)
+            item = self._place_picture(entry["name"], box, f"{prefix}_{i + 1}")
+            self.state.items.append(Item(f"{prefix}_n{i + 1}", "badge", (cx - size / 2 - 8, cy - size / 2 - 8, cx - size / 2 + 56, cy - size / 2 + 56),
+                                         {"text": str(i + 1)}))
+            if entry["caption"]:
+                self.apply({"op": "label", "text": entry["caption"], "at": item.name, "side": "below", "size": S.SIZE_LABEL_SMALL,
+                            "name": f"{prefix}_c{i + 1}"})
+            if prev is not None:
+                self.apply({"op": "arrow", "from": prev.name, "to": item.name, "colour": op.get("colour", "white"), "pad": 18})
+            prev = item
+
+    def _op_cycle(self, op: dict[str, Any]) -> None:
+        """Pictures around a ring with arrows between: a loop, a feedback."""
+        items = self._picture_items(op)
+        x0, y0, x1, y1 = SLOTS.get(op.get("slot", "center"), SLOTS["center"])
+        n = len(items)
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2 - 40
+        radius = min(x1 - x0, y1 - y0) * 0.30
+        size = min(200, radius * 0.72)
+        prefix = self._name(op, "cycle")
+        placed: list[Item] = []
+        for i, entry in enumerate(items):
+            a = -math.pi / 2 + 2 * math.pi * i / n
+            px, py = cx + radius * math.cos(a), cy + radius * math.sin(a)
+            box = (px - size / 2, py - size / 2, px + size / 2, py + size / 2)
+            item = self._place_picture(entry["name"], box, f"{prefix}_{i + 1}")
+            placed.append(item)
+            if entry["caption"]:
+                side = "above" if math.sin(a) < -0.3 else "below" if math.sin(a) > 0.3 else ("left" if math.cos(a) < 0 else "right")
+                self.apply({"op": "label", "text": entry["caption"], "at": item.name, "side": side, "size": S.SIZE_LABEL_SMALL,
+                            "name": f"{prefix}_c{i + 1}"})
+        for i, item in enumerate(placed):
+            nxt = placed[(i + 1) % n]
+            self.apply({"op": "arrow", "from": item.name, "to": nxt.name, "colour": op.get("colour", "yellow"), "bulge": -radius * 0.22, "pad": 14})
+        if op.get("text"):
+            self.apply({"op": "label", "text": str(op["text"]), "at": "center", "colour": op.get("text_colour", "white")})
+
+    def _op_stack(self, op: dict[str, Any]) -> None:
+        """Picture + a few words, one under another: a list with pictures."""
+        items = self._picture_items(op)
+        x0, y0, x1, y1 = SLOTS.get(op.get("slot", "left"), SLOTS["left"])
+        n = len(items)
+        row = min((y1 - y0) / n, 200)
+        size = row * 0.8
+        prefix = self._name(op, "stack")
+        top = (y0 + y1) / 2 - row * n / 2
+        for i, entry in enumerate(items):
+            cy = top + row * (i + 0.5)
+            box = (x0 + 10, cy - size / 2, x0 + 10 + size, cy + size / 2)
+            item = self._place_picture(entry["name"], box, f"{prefix}_{i + 1}")
+            if entry["caption"]:
+                self.apply({"op": "label", "text": entry["caption"], "at": item.name, "side": "right", "size": S.SIZE_LABEL_SMALL,
+                            "name": f"{prefix}_c{i + 1}"})
 
     def _op_columns(self, op: dict[str, Any]) -> None:
         box = (S.STAGE_FULL_LEFT, S.STAGE_TOP + 40, S.STAGE_FULL_RIGHT, S.SPRITE_TOP - 100)
@@ -701,6 +794,10 @@ class Canvas:
                     D.curved_arrow(d, points[0], points[1], item.props["bulge"], colour)
                 else:
                     D.polyline_arrow(d, points, colour)
+            elif item.kind == "badge":
+                x0, y0, x1, y1 = item.box
+                D.filled_outlined(d, "ellipse", item.box, S.YELLOW, width=5)
+                D.outlined_text(d, ((x0 + x1) / 2, (y0 + y1) / 2), item.props["text"], 40, S.INK, outline=S.YELLOW, width=0)
             elif item.kind == "dim":
                 D.dim(img, item.props["alpha"])
                 d = ImageDraw.Draw(img)
@@ -747,7 +844,7 @@ class Canvas:
             # an illustration is a thing on the page, not a poster: cap it
             cap = ILLUSTRATION_SIZES.get(str(props.get("size", "normal")), ILLUSTRATION_SIZES["normal"])
             w, h = box[2] - box[0], box[3] - box[1]
-            if max(w, h) > cap:
+            if props.get("size") != "fit" and max(w, h) > cap:
                 scale = cap / max(w, h)
                 cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
                 w, h = w * scale, h * scale

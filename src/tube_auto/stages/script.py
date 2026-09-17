@@ -217,8 +217,11 @@ def _system_prompt(brand: brand_mod.Brand, theme, target_chars: int) -> str:
 - 数字は1章に2つまで。数字より「どれくらい大きいか」の比喩を優先する。
 
 図の設計（最重要。視聴者はここで動画の質を判断します）:
-- **話に出てくる物は、その物の絵を置く**。物差しの話なら ruler、家なら house、海なら wave_icon。
-  言葉を箱に入れる concept は、絵にできない抽象語だけ。「物差し」という文字だけの図は不可。
+- **話に出てくる物は、その物の絵を置く**。物差しの話なら ruler、鐘なら bell、寺なら temple、海なら wave_icon。
+  台詞に出た物が絵になっていない章は差し戻される。言葉を箱に入れる concept は、絵にできない抽象語だけ。
+- **文字より絵**。ラベルは絵に添える一言（8字以内）。ラベルの数が絵の数の2倍を超える章は差し戻される。
+- **型を混ぜる**。波・グラフ・矢印ばかり使わない。手順は steps、循環は cycle、並べるなら stack、比べるなら compare、
+  割合は pie、時間は timeline、天体は sun/earth_globe/galaxy、人は person や scientist。
 - **1行につき板を1手動かす**。同じ絵のまま3行以上話さない（hold の連続は2行まで）。
 - 図は積み上げる。置く→矢印→ラベル→強調、と行ごとに1手ずつ。1つの図に10行かけてよい。
 - 文字の箇条書き（list_add）に逃げない。関係は arrow、対比は columns/table、割合は pie、時間は timeline。
@@ -541,6 +544,35 @@ def check_chapter(chapter: Chapter, brief: dict[str, Any], canvas: Canvas, known
             problems.append(f"{chapter.key} で図（要素）を置く操作が{placed}回しかない（{len(chapter.lines)}行なら{wanted_placed}回以上。"
                             "ラベルと矢印だけで済ませず、要素を置いて育てること）")
 
+    # pictures over words: things the lines mention must appear as pictures,
+    # labels must not outnumber pictures, and waves/graphs/arrows must not be
+    # the whole vocabulary of a chapter
+    if chapter.key not in ROOM_CHAPTERS or len(chapter.lines) >= 6:
+        ops = [op for line in chapter.lines for op in (line.ops or [])]
+        pictures = set()
+        for op in ops:
+            if op.get("op") in ("place", "add") and op.get("element") not in ("concept",):
+                pictures.add(op["element"])
+            if op.get("op") in ("steps", "cycle", "stack"):
+                for entry in op.get("items", []):
+                    pictures.add(str(entry).partition(":")[0])
+        on_stage = {i.props.get("element") for i in canvas.state.items if i.kind == "element"}
+        mentioned = mentioned_pictures("".join(line.display for line in chapter.lines))
+        have = pictures | on_stage
+        missing = [(jp, name) for jp, name in mentioned
+                   if name not in have and not (PICTURE_ALIASES.get(name, set()) & have)]
+        if missing:
+            problems.append(f"{chapter.key} の台詞に出た物の絵を置くこと: "
+                            + ", ".join(f"{jp}→{name}" for jp, name in missing[:5]))
+        labels = sum(1 for op in ops if op.get("op") == "label")
+        if labels > max(3, 2 * len(pictures)):
+            problems.append(f"{chapter.key} はラベル（文字）が{labels}個に対して絵が{len(pictures)}個。"
+                            "文字で説明せず、物の絵や steps/cycle/stack で示すこと")
+        liney = sum(1 for op in ops if op.get("op") in ("arrow",) or op.get("element") in ("wave", "scatter", "grid_panel"))
+        if len(ops) >= 8 and liney > 0.4 * len(ops):
+            problems.append(f"{chapter.key} は波・グラフ・矢印が{liney}/{len(ops)}操作と偏っている。"
+                            "絵（イラスト）、steps、cycle、stack、compare を混ぜること")
+
     wanted_figures = REQUIRED_FIGURES.get(chapter.key)
     if wanted_figures:
         used = {op.get("op") for line in chapter.lines for op in (line.ops or [])}
@@ -781,6 +813,51 @@ def write_preview(script: Script, idea_id: int) -> Path | None:
     except Exception as exc:  # noqa: BLE001 - a preview must never fail the script
         log.warning("preview failed: %s", exc)
         return None
+
+
+# A drawn element that shows the same thing as a catalogue picture.
+PICTURE_ALIASES = {
+    "sun_icon": {"sun"}, "earth_icon": {"earth_globe", "earth_arc"}, "globe": {"earth_globe"},
+    "moon_icon": {"moon"}, "full_moon": {"moon"}, "cloud_icon": {"cloud"}, "star_icon": {"star_dots"},
+    "milky_way": {"galaxy", "star_dots"}, "telescope_icon": {"telescope"}, "ice_cube": {"ice_block"},
+    "scale": {"balance"}, "wave_icon": {"wave"}, "ripple": {"wave"}, "scientist": {"person"},
+    "hole": {"black_blob"},
+}
+
+# One-character catalogue words that are mostly suffixes of other words.
+_GENERIC_SINGLE = {"目", "手", "本", "的", "家", "道", "穴", "塩", "岩", "街", "旗", "剣", "的"}
+
+
+def mentioned_pictures(text: str) -> list[tuple[str, str]]:
+    """Catalogue things named in the text, longest match first, as (日本語, name).
+
+    Two-character words match as substrings; a one-character word only when
+    it stands alone (「鐘」, not 重力波's 波, not 望遠鏡's 鏡).
+    """
+    from ..canvas.illustrations import ILLUSTRATIONS
+
+    found: list[tuple[str, str]] = []
+    covered: list[tuple[int, int]] = []
+    by_len = sorted(((jp, name) for name, (_, jp) in ILLUSTRATIONS.items() if jp), key=lambda x: -len(x[0]))
+    for jp, name in by_len:
+        start = text.find(jp)
+        while start != -1:
+            end = start + len(jp)
+            overlapped = any(s < end and start < e for s, e in covered)
+            if not overlapped:
+                if len(jp) >= 2:
+                    ok = True
+                else:
+                    before = text[start - 1] if start > 0 else ""
+                    after = text[end] if end < len(text) else ""
+                    kanji = lambda ch: "一" <= ch <= "鿿"   # noqa: E731
+                    ok = jp not in _GENERIC_SINGLE and not kanji(before) and not kanji(after)
+                if ok:
+                    covered.append((start, end))
+                    if name not in {n for _, n in found}:
+                        found.append((jp, name))
+            start = text.find(jp, end)
+    return found
 
 
 def _library():

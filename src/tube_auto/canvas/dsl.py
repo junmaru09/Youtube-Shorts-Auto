@@ -78,6 +78,8 @@ def _item(fields: tuple[str, ...], raw: str, key: str) -> dict[str, Any]:
 
 def _list(key: str, raw: str, op: str) -> Any:
     shape = _COLUMN_ITEM if (key == "items" and op == "columns") else _LIST_KEYS[key]
+    if key == "items" and op in ("steps", "cycle", "stack"):
+        shape = str                      # picture:caption, split later
     # a plain tuple of numbers (span=0.2:0.8, box=0.3:0.2:0.4:0.3) splits on ':'
     items = [s.strip() for s in raw.split(":" if shape == "numbers" else "|") if s.strip()]
     if shape is str:

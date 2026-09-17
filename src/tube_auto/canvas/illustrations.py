@@ -52,6 +52,29 @@ ILLUSTRATIONS: dict[str, tuple[str, str]] = {
     "key": ("1f511", "鍵"), "lock": ("1f512", "錠"), "package": ("1f4e6", "箱"), "scissors": ("2702", "はさみ"),
     "hammer": ("1f528", "ハンマー"), "wrench": ("1f527", "スパナ"), "link": ("1f517", "鎖"), "chart_up": ("1f4c8", "上がるグラフ"),
     "chart_down": ("1f4c9", "下がるグラフ"), "shield": ("1f6e1", "盾"), "crystal_ball": ("1f52e", "水晶玉"), "dizzy": ("1f4ab", "目が回る"),
+    # places
+    "temple": ("1f6d5", "寺"), "shrine": ("26e9", "神社"), "tokyo_tower": ("1f5fc", "東京タワー"), "mount_fuji": ("1f5fb", "富士山"),
+    "castle": ("1f3ef", "城"), "city": ("1f3d9", "街"), "factory": ("1f3ed", "工場"), "hospital": ("1f3e5", "病院"),
+    "stadium": ("1f3df", "スタジアム"), "tent": ("26fa", "テント"), "bridge": ("1f309", "橋"), "beach": ("1f3d6", "海辺"),
+    "park": ("1f3de", "公園"), "road": ("1f6e3", "道路"), "lab": ("1f52c", "研究室"), "office": ("1f3e2", "ビル"),
+    # people
+    "child": ("1f9d2", "子ども"), "student": ("1f9d1_200d_1f393", "学生"), "old_man": ("1f474", "おじいさん"), "old_woman": ("1f475", "おばあさん"),
+    "doctor": ("1f9d1_200d_2695", "医者"), "cook": ("1f9d1_200d_1f373", "料理人"), "farmer": ("1f9d1_200d_1f33e", "農家"),
+    "detective": ("1f575", "探偵"), "runner": ("1f3c3", "走る人"), "thinker": ("1f914", "考える顔"), "surprised_face": ("1f632", "驚く顔"),
+    "sleeping": ("1f634", "眠る顔"), "family": ("1f46a", "家族"), "crowd": ("1f465", "人々"), "baby": ("1f476", "赤ちゃん"),
+    # vehicles and animals
+    "bus": ("1f68c", "バス"), "truck": ("1f69a", "トラック"), "helicopter": ("1f681", "ヘリコプター"), "sailboat": ("26f5", "ヨット"),
+    "elephant": ("1f418", "象"), "mouse": ("1f42d", "ねずみ"), "ant": ("1f41c", "アリ"), "turtle": ("1f422", "カメ"),
+    "rabbit": ("1f430", "うさぎ"), "horse": ("1f434", "馬"), "cow": ("1f42e", "牛"), "penguin": ("1f427", "ペンギン"),
+    "frog": ("1f438", "カエル"), "bee": ("1f41d", "ハチ"), "octopus": ("1f419", "タコ"), "shark": ("1f988", "サメ"),
+    # more objects that come up
+    "sword": ("1f5e1", "剣"), "bow": ("1f3f9", "弓矢"), "boomerang": ("1fa83", "ブーメラン"), "kite": ("1fa81", "凧"),
+    "yo_yo": ("1fa80", "ヨーヨー"), "top": ("1f3b0", "スロット"), "magnifier": ("1f50d", "虫めがね"), "glasses": ("1f453", "めがね"),
+    "lantern": ("1f3ee", "提灯"), "fan": ("1faad", "うちわ"), "rice": ("1f35a", "ごはん"), "sushi": ("1f363", "寿司"),
+    "onigiri": ("1f359", "おにぎり"), "tea": ("1f375", "お茶"), "newspaper": ("1f4f0", "新聞"), "letter": ("2709", "手紙"),
+    "trophy2": ("1f947", "金メダル"), "medal": ("1f3c5", "メダル"), "flag": ("1f6a9", "旗"), "bomb": ("1f4a3", "爆弾"),
+    "explosion": ("1f4a5", "爆発"), "smoke": ("1f4a8", "煙"), "hole": ("1f573", "穴"), "spiral": ("1f300", "渦"),
+    "thermometer_face": ("1f912", "熱がある顔"), "cold_face": ("1f976", "寒い顔"), "hot_face": ("1f975", "暑い顔"),
 }
 
 

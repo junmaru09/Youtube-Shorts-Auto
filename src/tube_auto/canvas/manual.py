@@ -45,6 +45,9 @@ VISUAL_MANUAL = f"""\
 - `highlight target=<参照>` 黄色の楕円で囲む　`strike target=<要素名>` 打ち消し線
 - `list_add text=…` 右上に番号付きで1行追加（使うのは列挙が本当に要るときだけ）
 - `expression explainer=<表情> listener=<表情>` 表情（normal happy surprised thinking sad）
+- **絵を並べる型**（文字の箇条書きの代わりに使う）:
+  `steps items=bell:鐘を叩く|note:音が出る|ear:届く` 手順・因果を番号と矢印で / `cycle items=sun_icon:暖める|droplet:蒸発|cloud_icon:雲|rain:雨` 循環 /
+  `stack items=ruler:長さ|clock:時間|scale:重さ` 絵＋一言の縦並び。items は 絵の名前:一言（8字以内）
 - `hold` 板を変えない（連続は2行まで）
 - `zoom from=<参照> element=<要素> slot=right` 虫眼鏡で拡大　`compare elements=a|b labels=A|B` 左右並べ
 

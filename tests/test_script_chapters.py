@@ -228,3 +228,33 @@ def test_concept_does_not_count_as_a_placed_figure():
     chapter = Chapter(key="mechanism1", title="t", lines=lines)
     problems = script_stage.check_chapter(chapter, {"key": "mechanism1", "lines": 12}, Canvas(), set())
     assert any("要素）を置く操作" in p for p in problems)
+
+
+def test_things_mentioned_must_be_pictured_and_labels_must_not_outnumber_pictures():
+    from tube_auto.canvas import AssetLibrary, Canvas
+    from tube_auto.models import Chapter, Line
+    from tube_auto import paths
+
+    def chapter(visuals, texts):
+        lines = [Line("explainer", f"{txt}のだ", "", visual=v) for txt, v in zip(texts, visuals)]
+        lines[0].visual = ["clear"] + lines[0].visual
+        return Chapter(key="mechanism1", title="t", lines=lines)
+    canvas = lambda: Canvas(assets=AssetLibrary(paths.ASSETS_DIR))   # noqa: E731
+    brief = {"key": "mechanism1", "lines": 8}
+    words = chapter([["label 鐘 at=top"], ["label 太鼓 at=left"], ["label 響き at=right"], ["label 余韻 at=bottom"],
+                     ["arrow from=top to=bottom"], ["hold"], ["label 音 at=center"], ["hold"]],
+                    ["鐘を叩く", "太鼓も同じ", "響きが混ざる", "余韻が残る", "そして", "つまり", "音なのだ", "以上"])
+    problems = script_stage.check_chapter(words, brief, canvas(), set())
+    assert any("鐘→bell" in p and "太鼓→drum" in p for p in problems)
+    assert any("ラベル" in p and "絵が0個" in p for p in problems)
+    pictures = chapter([["bell slot=left name=b"], ["drum slot=right name=d"], ["arrow from=b to=d"], ["label 混ざる at=d side=above"],
+                        ["steps items=bell:叩く|note:鳴る|ear:届く"], ["hold"], ["chain name=c nodes=甲:0.2:0.9|乙:0.8:0.9 edges=0-1"], ["hold"]],
+                       ["鐘を叩く", "太鼓も同じ", "響きが混ざる", "余韻が残る", "そして", "つまり", "音なのだ", "以上"])
+    problems = script_stage.check_chapter(pictures, brief, canvas(), set())
+    assert not [p for p in problems if "絵を置く" in p or "ラベル" in p], problems
+
+
+def test_mentioned_pictures_ignores_suffixes():
+    found = dict(script_stage.mentioned_pictures("重力波を望遠鏡で。三つ目の道。鐘が鳴る。"))
+    assert "鐘" in found and "望遠鏡" in found
+    assert "波" not in found and "目" not in found and "道" not in found
