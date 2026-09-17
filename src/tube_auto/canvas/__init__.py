@@ -151,8 +151,10 @@ class State:
             h = S.SIZE_TITLE * 1.25 * len(lines)
             return (cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2)
         if ref == "heading" and self.heading and not any(i.name == "heading" for i in self.items):
+            w = D.text_size(self.heading, S.SIZE_HEADING)[0] + 80
+            if S.THEME == "notebook":
+                return (S.STAGE_LEFT, 0, S.STAGE_LEFT + w, S.HEADING_Y + S.SIZE_HEADING / 2 + 14)
             cx = (S.STAGE_LEFT + S.STAGE_RIGHT) / 2
-            w = len(self.heading) * S.SIZE_HEADING
             return (cx - w / 2, S.HEADING_Y - S.SIZE_HEADING / 2, cx + w / 2, S.HEADING_Y + S.SIZE_HEADING / 2)
         if "." in ref:
             item_name, part = ref.split(".", 1)
@@ -266,7 +268,9 @@ class Canvas:
 
     def _op_title(self, op: dict[str, Any]) -> None:
         self.state.title = op.get("text") or None
-        if op.get("dim"):
+        # a big title over a figure dims the figure, as the reference does;
+        # `dim=false` keeps the stage bright (a title alone on a page)
+        if self.state.title and op.get("dim", True) and any(i.kind != "dim" for i in self.state.items):
             self._op_dim(op)
 
     def _op_dim(self, op: dict[str, Any]) -> None:
@@ -285,7 +289,20 @@ class Canvas:
         slot = op.get("slot", "center")
         box = self._box_from(op) if "box" in op else self.state.box_of(slot) if slot in SLOTS else self._box_from(op)
         props = {k: v for k, v in op.items() if k not in ("op", "element", "slot", "name", "box")}
-        item = Item(self._name(op, element), "element", box, {"element": element, **props})
+        name = self._name(op, element)
+        existing = next((i for i in self.state.items if i.name == name and i.kind == "element"), None)
+        if existing is not None and "slot" not in op and "box" not in op:
+            # the same thing placed again (a balance re-tilted, a pie with a
+            # new slice): change it where it stands rather than add a twin
+            existing.props = {"element": element, **props}
+            scratch = Image.new("RGB", (S.WIDTH, S.HEIGHT))
+            existing.parts = self._draw_element(scratch, ImageDraw.Draw(scratch), existing)
+            own = existing.parts.get("self")
+            existing.extent = tuple(own) if own else existing.extent
+            return
+        if existing is not None:
+            self.state.items.remove(existing)
+        item = Item(name, "element", box, {"element": element, **props})
         self._register(item)
         if slot not in ("sky", "floor", "wide", "top") and "box" not in op:
             self._nudge_element(item, box)
@@ -408,6 +425,10 @@ class Canvas:
         """Boxes a new label must stay off: every label, every text-sized
         part of every element, and the whole of text-bearing elements."""
         boxes: list[Box] = []
+        if self.state.heading:
+            boxes.append(self.state.box_of("heading"))
+        if self.state.title:
+            boxes.append(self.state.box_of("title"))
         for item in self.state.items:
             if item is except_item:
                 continue
@@ -467,26 +488,33 @@ class Canvas:
         top of each other. The slot box is moved and the element redrawn.
         """
         others = [i for i in self.state.items if i.kind in ("element", "label") and i is not item]
+        fixed = [self.state.box_of(ref) for ref in ("heading", "title")
+                 if getattr(self.state, ref) and not any(i.name == ref for i in self.state.items)]
         mine = item.bounds
-        if not any(_overlaps(mine, o.bounds, 0) for o in others):
+        if not any(_overlaps(mine, o.bounds, 0) for o in others) and not any(_overlaps(mine, f, 0) for f in fixed):
             return
         w, h = mine[2] - mine[0], mine[3] - mine[1]
         candidates = []
-        pushed = _push_out(mine, [o.bounds for o in others], margin=16)
+        pushed = _push_out(mine, [o.bounds for o in others] + fixed, margin=16)
         if pushed is not None:
             candidates.append((pushed[0] - mine[0], pushed[1] - mine[1]))
         for k in (1, 2):
             candidates += [((w + 40) * k, 0), (-(w + 40) * k, 0), (0, (h + 40) * k), (0, -(h + 40) * k)]
-        for dx, dy in candidates:
-            moved_slot = (slot_box[0] + dx, slot_box[1] + dy, slot_box[2] + dx, slot_box[3] + dy)
-            item.box = moved_slot
-            scratch = Image.new("RGB", (S.WIDTH, S.HEIGHT))
-            parts = self._draw_element(scratch, ImageDraw.Draw(scratch), item)
-            own = parts.get("self", moved_slot)
-            if _inside_stage(own) and not any(_overlaps(own, o.bounds, 0) for o in others):
-                item.parts = parts
-                item.extent = tuple(own)
-                return
+        for scale in (1.0, 0.72, 0.5):
+            sw, sh = (slot_box[2] - slot_box[0]) * scale, (slot_box[3] - slot_box[1]) * scale
+            scx, scy = (slot_box[0] + slot_box[2]) / 2, (slot_box[1] + slot_box[3]) / 2
+            base = (scx - sw / 2, scy - sh / 2, scx + sw / 2, scy + sh / 2)
+            for dx, dy in ([(0, 0)] if scale < 1 else []) + candidates:
+                moved_slot = (base[0] + dx, base[1] + dy, base[2] + dx, base[3] + dy)
+                item.box = moved_slot
+                scratch = Image.new("RGB", (S.WIDTH, S.HEIGHT))
+                parts = self._draw_element(scratch, ImageDraw.Draw(scratch), item)
+                own = parts.get("self", moved_slot)
+                if (_inside_stage(own) and not any(_overlaps(own, o.bounds, 0) for o in others)
+                        and not any(_overlaps(own, f, 0) for f in fixed)):
+                    item.parts = parts
+                    item.extent = tuple(own)
+                    return
         # nowhere free: back to where it was
         item.box = slot_box
         scratch = Image.new("RGB", (S.WIDTH, S.HEIGHT))

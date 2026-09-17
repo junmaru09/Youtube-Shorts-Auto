@@ -87,10 +87,14 @@ def test_dim_is_an_item_so_later_items_draw_bright():
     assert kinds == ["label", "dim", "label"]
 
 
-def test_title_with_dim_inserts_a_dim_item():
-    c = _canvas({"op": "title", "text": "T", "dim": True})
-    assert [i.kind for i in c.state.items] == ["dim"]
+def test_title_dims_what_is_under_it_and_nothing_else():
+    c = _canvas({"op": "label", "text": "x"}, {"op": "title", "text": "T"})
+    assert [i.kind for i in c.state.items] == ["label", "dim"]     # default: dim the figure
     assert c.state.title == "T"
+    c = _canvas({"op": "title", "text": "T"})
+    assert [i.kind for i in c.state.items] == []                   # nothing under it: no dim
+    c = _canvas({"op": "label", "text": "x"}, {"op": "title", "text": "T", "dim": False})
+    assert [i.kind for i in c.state.items] == ["label"]
 
 
 def test_arrow_to_a_direction_and_via_a_corner():

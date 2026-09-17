@@ -223,11 +223,31 @@ def pie(d: ImageDraw.ImageDraw, box: Box, slices: list[dict[str, Any]], **_: Any
     """
     box = _fit(box, 1.0)
     cx, cy = _centre(box)
-    r = (box[2] - box[0]) / 2 * 0.70      # leave room for the outside labels
+    half = (box[2] - box[0]) / 2
+    r = half * 0.70                        # leave room for the outside labels
+    # in a narrow slot the labels would run past the slot (into a
+    # character): shrink the disc until the widest label fits beside it
+    narrow = (box[2] - box[0]) < S.STAGE_W * 0.6
+    if narrow:
+        widest = max((text_size(s["label"], S.SIZE_LABEL)[0] for s in slices), default=0)
+        r = max(half * 0.42, min(r, half - 26 - widest - 12))
+        # beside a character: keep the lower labels above the sprite's head
+        cy = min(cy, S.SPRITE_TOP - 70 - r)
     inner = (cx - r, cy - r, cx + r, cy + r)
     total = sum(s["value"] for s in slices) or 1.0
     start = -90.0
     parts: Parts = {"self": box}
+    taken: list[Box] = []          # label boxes placed so far, to stack away from
+
+    def clear_of(b: Box, sin: float) -> Box:
+        # slide a label outward (up for the top half, down for the bottom)
+        for _ in range(6):
+            hit = next((o for o in taken if not (b[2] < o[0] - 6 or b[0] > o[2] + 6 or b[3] < o[1] - 4 or b[1] > o[3] + 4)), None)
+            if hit is None:
+                return b
+            dy = (hit[1] - b[3] - 8) if sin < 0 else (hit[3] - b[1] + 8)
+            b = (b[0], b[1] + dy, b[2], b[3] + dy)
+        return b
 
     for s in slices:
         sweep = 360.0 * s["value"] / total
@@ -238,7 +258,7 @@ def pie(d: ImageDraw.ImageDraw, box: Box, slices: list[dict[str, Any]], **_: Any
         # percentage inside: big slices near the middle, slivers near the rim
         pct = f"{round(100 * s['value'] / total)}%"
         if sweep >= 40:
-            outlined_text(d, (cx + r * 0.58 * cos, cy + r * 0.58 * sin), pct, S.SIZE_LABEL_SMALL, S.WHITE)
+            outlined_text(d, (cx + r * 0.64 * cos, cy + r * 0.64 * sin), pct, S.SIZE_LABEL_SMALL, S.WHITE)
         elif sweep >= 8:
             outlined_text(d, (cx + r * 0.76 * cos, cy + r * 0.76 * sin), pct, 30, S.WHITE)
         # name outside: put the label box just past the rim, pushed away
@@ -247,18 +267,30 @@ def pie(d: ImageDraw.ImageDraw, box: Box, slices: list[dict[str, Any]], **_: Any
         gap = 26
         px, py = cx + (r + gap) * cos, cy + (r + gap) * sin
         lx, ly = px + tw / 2 * cos, py + th / 2 * sin
+        lbox = clear_of((lx - tw / 2, ly - th / 2, lx + tw / 2, ly + th / 2), sin)
+        lx, ly = (lbox[0] + lbox[2]) / 2, (lbox[1] + lbox[3]) / 2
         outlined_text(d, (lx, ly), s["label"], S.SIZE_LABEL, colour)
-        parts[s["label"]] = (lx - tw / 2, ly - th / 2, lx + tw / 2, ly + th / 2)
+        parts[s["label"]] = lbox
+        taken.append(lbox)
         if s.get("note"):
             lines = s["note"].split("\n")
             step = S.SIZE_NOTE * 1.2
             top = ly + th / 2 + step / 2 + 4
+            nw = max(text_size(line, S.SIZE_NOTE, heavy=False)[0] for line in lines)
+            nbox = clear_of((lx - nw / 2, top - step / 2, lx + nw / 2, top + (len(lines) - 0.5) * step), 1)
+            top = nbox[1] + step / 2
             for i, line in enumerate(lines):
                 outlined_text(d, (lx, top + i * step), line, S.SIZE_NOTE, S.WHITE, heavy=False)
+            taken.append(nbox)
+            parts[f"{s['label']}.note"] = nbox
         start += sweep
 
     if _.get("centre_label"):
         outlined_text(d, (cx, cy), _["centre_label"], S.SIZE_LABEL_SMALL, S.WHITE)
+    if taken:
+        parts["self"] = (min(cx - r, *(b[0] for b in taken)), min(cy - r, *(b[1] for b in taken)),
+                         max(cx + r, *(b[2] for b in taken)), max(cy + r, *(b[3] for b in taken)))
+    parts["disc"] = (cx - r, cy - r, cx + r, cy + r)
     return parts
 
 
@@ -691,8 +723,8 @@ def balance(d: ImageDraw.ImageDraw, box: Box, left: str = "", right: str = "", t
             d.line(((px, py), (px + ex, pan_y)), fill=S.INK, width=5)
         filled_outlined(d, "ellipse", (px - 70, pan_y - 14, px + 70, pan_y + 14), (200, 200, 210), width=5)
         if text:
-            outlined_text(d, (px, pan_y - 44), text, S.SIZE_LABEL_SMALL, S.WHITE)
-        parts[name] = (px - 70, pan_y - 60, px + 70, pan_y + 14)
+            outlined_text(d, (px, pan_y + 46), text, S.SIZE_LABEL_SMALL, S.WHITE)
+        parts[name] = (px - 70, pan_y - 14, px + 70, pan_y + 76 if text else pan_y + 14)
     return parts
 
 
