@@ -775,10 +775,29 @@ def _scripted_idea(conn, chars: int, key: str = "k1") -> int:
     db.upsert_script(
         conn, idea_id=idea_id, char_count=chars, model="m", hooks=[],
         chapters=[{"title": "章", "lines": [{"speaker": "explainer",
-                    "display": "あ" * 10, "spoken": "あ" * 10, "refs": []}]}],
+                    "display": "あ" * 10, "spoken": "あ" * 10, "refs": [],
+                    "visual": ["clear"], "ops": [{"op": "clear"}]}]}],
     )
     conn.commit()
     return idea_id
+
+
+def test_narration_refuses_a_script_without_visuals(temp_db, temp_work, monkeypatch):
+    """A pre-whiteboard script narrated by --idea gave twenty minutes of an
+    empty stage. Refuse it with the command that fixes it."""
+    from tube_auto.stages import narrate
+
+    with db.session() as conn:
+        idea_id = _idea(conn, "old", status="scripted")
+        db.upsert_script(
+            conn, idea_id=idea_id, char_count=10, model="m", hooks=[],
+            chapters=[{"title": "章", "lines": [{"speaker": "explainer",
+                        "display": "あ" * 10, "spoken": "あ" * 10, "refs": []}]}],
+        )
+        conn.commit()
+    result = narrate.run(idea_id=idea_id, provider="silent")
+    assert result.failed == 1 and result.narrated == 0
+    assert "visual" in result.errors[0] and f"--idea {idea_id}" in result.errors[0]
 
 
 def test_narration_refuses_to_cross_the_free_tier(temp_db, temp_work, monkeypatch):

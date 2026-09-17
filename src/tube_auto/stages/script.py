@@ -161,9 +161,24 @@ def _system_prompt(brand: brand_mod.Brand, theme, target_chars: int) -> str:
   言い換え「要するに〜ってことなのね」、驚き「え、本当にそんなことが？」、次の疑問。
   全体の**4分の1前後**（20〜40%）を listener が話す。相槌だけの行は禁止。
 - 「章末は疑問で終える」と指定された章は、最後の行を疑問文にする。次の章がそれに答える。
-- 冒頭の章では本題の名前も論文の結論も言わない。身近な観察から入り、explainer が逆説を返す。
-- 専門用語は、図で描けて身近な例で言い直せるものだけ使う。数式名・手法名・論文の実験条件は出さない。
-- 1行は1〜2文。長い段落にしない。最後の行は「{brand.closing_line}」。
+- 1行は1〜2文、字幕は30字×2行に収まる長さ（display は60字以内）。最後の行は「{brand.closing_line}」。
+
+冒頭（opener）の型。何も知らない人が「見てみよう」と思う入り方にする:
+- 本題の名前も、論文も、数字も、専門用語も出さない。listener の身近な体験から始める。
+- 手本（テーマが「空はなぜ青いか」なら）:
+    listener: 「今日海に行ってきたんだけど、めっちゃ青くてきれいだったわ」
+    listener: 「あれ、でも水って透明よね？ なんで海は青く見えるのかしら」
+    explainer: 「いい質問なのだ。海のほかにも青く見えるものはないのだ？」
+    listener: 「……空？」
+    explainer: 「そう。空も海も同じ理由で青いのだ。今日はそれを説明するのだ」
+  この「身近な体験 → 素朴な疑問 → もう一つの例 → 今日の話」の順番を、テーマに合わせて作る。
+- 冒頭で難しい話が出た瞬間に視聴者は帰る。opener と context の章は中学生が分かる言葉だけで書く。
+
+言葉の選び方（全章）:
+- 専門用語は、図で描けて身近な例で言い直せるものだけ使う。使うときは、その行か次の行で必ず言い換える。
+- 数式名・手法名・装置の正式名称・論文の実験条件（「〜モデル」「〜分光装置」「ガンマが…」）は出さない。
+  どうしても要るなら「〜という考え方」「〜という望遠鏡」のように噛み砕く。
+- 数字は1章に2つまで。数字より「どれくらい大きいか」の比喩を優先する。
 
 図の設計（最重要。視聴者はここで動画の質を判断します）:
 - **1行につき板を1手動かす**。同じ絵のまま3行以上話さない（hold の連続は2行まで）。
@@ -288,6 +303,9 @@ def _parse(payload: dict[str, Any]) -> Script:
 LISTENER_SHARE = (0.15, 0.45)
 # Lines in a row that leave the stage untouched before it counts as static.
 MAX_HOLD_RUN = 2
+# A subtitle is two rows of SUBTITLE_WRAP characters. Longer lines overflow
+# the band, and a line that long is a paragraph anyway.
+MAX_DISPLAY_CHARS = 60
 
 
 def check_visuals(script: Script) -> list[str]:
@@ -364,6 +382,12 @@ def validate(script: Script, known_refs: set[str], target_chars: int,
     report = citations.check([c.as_dict() for c in script.chapters], known_refs)
     if not report.ok:
         problems.append(report.describe())
+
+    too_long = [f"{c.key}:{i + 1}({len(line.display)}字)" for c in script.chapters
+                for i, line in enumerate(c.lines) if len(line.display) > MAX_DISPLAY_CHARS]
+    if too_long:
+        problems.append(f"{len(too_long)} 行の display が{MAX_DISPLAY_CHARS}字を超えている（字幕2行に収まらない）: "
+                        + ", ".join(too_long[:5]))
 
     unreadable: list[str] = []
     for chapter in script.chapters:

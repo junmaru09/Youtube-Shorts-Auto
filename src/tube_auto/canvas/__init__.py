@@ -604,6 +604,34 @@ def _placeholder_sprites(img: Image.Image, speaker: str, only: str | None = None
         D.outlined_text(d, (x + S.SPRITE_SIZE / 2, y + S.SPRITE_SIZE / 2), label, 44, S.WHITE)
 
 
+# Characters a wrapped line must not start or end with (禁則処理).
+_NO_LINE_START = "。、）」』】〕》〉！？ー・…‥,.!?)]}"
+_NO_LINE_END = "（「『【〔《〈([{"
+
+
+def wrap_subtitle(text: str, width: int = S.SUBTITLE_WRAP) -> list[str]:
+    """Break a subtitle into lines of at most `width` characters.
+
+    Japanese has no spaces, so wrapping is by count, but a break that puts a
+    closing mark at the start of a line reads as a typesetting error.
+    Explicit newlines in the text are kept.
+    """
+    lines: list[str] = []
+    for paragraph in text.split("\n"):
+        remaining = paragraph
+        while len(remaining) > width:
+            cut = width
+            while cut > 1 and (remaining[cut] in _NO_LINE_START or remaining[cut - 1] in _NO_LINE_END):
+                cut -= 1
+            if cut <= 1:
+                cut = width
+            lines.append(remaining[:cut])
+            remaining = remaining[cut:]
+        if remaining or not paragraph:
+            lines.append(remaining)
+    return lines
+
+
 def _subtitle_band(img: Image.Image, text: str, speaker: str) -> None:
     band = Image.new("RGBA", (S.WIDTH, S.HEIGHT - S.BAND_TOP), (255, 255, 255, 150))
     img.paste(band, (0, S.BAND_TOP), band)
@@ -611,8 +639,11 @@ def _subtitle_band(img: Image.Image, text: str, speaker: str) -> None:
         return
     d = ImageDraw.Draw(img)
     colour = S.SPEAKER_COLOURS.get(speaker, S.WHITE)
+    lines = wrap_subtitle(text)
+    # two lines fit the band at full size; a third only at a smaller one
+    size = S.SIZE_SUBTITLE if len(lines) <= 2 else S.SIZE_SUBTITLE_SMALL
     D.outlined_lines(d, (S.WIDTH / 2, S.BAND_TOP + (S.HEIGHT - S.BAND_TOP) / 2),
-                     text.split("\n"), S.SIZE_SUBTITLE, colour, width=S.OUTLINE_SUBTITLE, spacing=1.3)
+                     lines, size, colour, width=S.OUTLINE_SUBTITLE, spacing=1.25)
 
 
 class AssetLibrary:
@@ -692,6 +723,10 @@ class SpriteSet:
             visible = min(round(sprite.height * scale), S.BAND_TOP + S.SPRITE_CUT - y)
             sprite = sprite.resize((S.SPRITE_WIDTH, round(sprite.height * scale)), Image.LANCZOS)
             sprite = sprite.crop((0, 0, S.SPRITE_WIDTH, visible))
+            if role in S.SPRITE_FLIP:
+                # both 立ち絵 face the viewer's right; the one on the right is
+                # mirrored so the two look at each other across the stage
+                sprite = sprite.transpose(Image.FLIP_LEFT_RIGHT)
             if not talking:
                 r, g, b, a = sprite.split()
                 sprite = Image.merge("RGBA", (r.point(lambda v: int(v * 0.82)), g.point(lambda v: int(v * 0.82)),

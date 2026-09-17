@@ -202,6 +202,16 @@ def run(limit: int = 1, idea_id: int | None = None, provider: str | None = None)
             chapters = json.loads(script_row["chapters_json"])
             workdir = paths.AUDIO_DIR / f"idea_{current_id:05d}"
 
+            # A script from before the whiteboard has no `ops`; narrating it
+            # gives twenty minutes of an empty stage. That happened once.
+            if not any(line.get("ops") for c in chapters for line in c.get("lines", [])):
+                result.failed += 1
+                result.errors.append(
+                    f"idea {current_id}: この台本には板書の指定（visual）が無い。"
+                    f"`tube-auto script --idea {current_id} --reset-attempts` で書き直してから"
+                )
+                continue
+
             # Refuse to cross the free tier. Google does not fail past the
             # allowance — it starts charging — and a budget alert on their side
             # only sends an email. This is the one place the crossing can

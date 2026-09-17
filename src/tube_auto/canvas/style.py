@@ -32,6 +32,7 @@ SPRITE_TOP = 600
 SPRITE_CUT = 24                   # px of chin allowed over the band
 SPRITE_LEFT = (20, SPRITE_TOP)
 SPRITE_RIGHT = (WIDTH - SPRITE_WIDTH - 20, SPRITE_TOP)
+SPRITE_FLIP = {"listener"}        # mirrored, so the pair face each other
 
 # The stage: where figures go. Above the sprites' heads it is nearly the
 # full frame width (the reference puts tables and box rows at x=120); level
@@ -94,6 +95,8 @@ SIZE_LABEL_SMALL = 40
 SIZE_NOTE = 32                     # the white description under a pie label
 SIZE_LIST = 40
 SIZE_SUBTITLE = 46
+SIZE_SUBTITLE_SMALL = 38           # when a line needs three rows
+SUBTITLE_WRAP = 30                 # characters per subtitle row; 30 × 46px fits between the sprites
 SIZE_TABLE = 48                    # table rows are as big as labels
 TABLE_ROW = 135                    # row pitch, measured
 

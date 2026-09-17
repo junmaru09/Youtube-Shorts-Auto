@@ -394,6 +394,9 @@ def cmd_requeue(args: argparse.Namespace) -> int:
             return 1
         db.set_idea_status(conn, args.idea, "researched")
         db.reset_attempts(conn, args.idea)
+        # the old script and narration must not be picked up by --idea later
+        conn.execute("DELETE FROM narrations WHERE idea_id = ?", (args.idea,))
+        conn.execute("DELETE FROM scripts WHERE idea_id = ?", (args.idea,))
         conn.commit()
     print(f"idea {args.idea} ({row['hook'][:40]}) is back at 'researched'; run `tube-auto script --idea {args.idea}`")
     return 0
