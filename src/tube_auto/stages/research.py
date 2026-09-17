@@ -61,7 +61,6 @@ TOPIC_TOOL = {
                     "required": ["key", "title", "covers", "visual_intent"],
                 },
             },
-        },
             "history": {
                 "type": "array",
                 "items": {
