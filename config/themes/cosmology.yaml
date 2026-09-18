@@ -1,0 +1,46 @@
+# 宇宙論と時間。
+#
+# NASA動画は極端に少ない（ダークマター18件、宇宙マイクロ波背景1件）。
+# ほぼ図解と概念図で構成する。逆に言えば、図解の質がそのまま動画の質になる。
+
+id: cosmology
+enabled: true
+languages: [ja]
+description: 宇宙全体のふるまいと、時間・空間そのものの性質
+audience: 30〜50代・知的好奇心層。根源的な問いに関心がある層
+
+nasa_queries:
+  - cosmic microwave background
+  - dark matter
+  - dark energy
+  - galaxy formation
+  - early universe
+
+# 動画は使わない。このテーマで通る映像は数件しかなく、
+# 画面に写っているものをメタデータから判定できない。
+allow_footage: false
+
+arxiv_categories: [astro-ph.CO, gr-qc]
+
+title_patterns:
+  ja:
+    - "{subject}は本当に存在するのか"
+    - "{subject}をめぐって今も割れている議論"
+    - "{subject}、いま分かっているところまで"
+    - "{subject}の測定値が合わない問題"
+
+hashtags:
+  ja: ["#宇宙", "#宇宙論", "#科学", "#解説"]
+
+topic_seeds:
+  - ハッブル定数の測定値が2つに割れている問題
+  - ダークマターの候補が次々に否定されてきた歴史
+  - 宇宙マイクロ波背景に残る初期のゆらぎ
+  - 宇宙の膨張が加速していると分かった経緯
+  - 銀河の回転曲線が示したもの
+  - 観測可能な宇宙の果てとは何を指すのか
+
+banned:
+  - 未確立の仮説を定説として語る
+  - マルチバースを実在するかのように扱う
+  - 一次ソースのない数値
