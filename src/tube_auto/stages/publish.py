@@ -40,6 +40,29 @@ def _day_start() -> str:
     return (datetime.now(UTC) - timedelta(days=1)).isoformat(timespec="seconds")
 
 
+def _picture_credits(idea) -> list[str]:
+    """Credits for the picture packs this video drew from.
+
+    Only the packs it used: crediting いらすとや on a video with no
+    いらすとや illustration is noise, and crediting nothing when it has
+    one breaks the licence.
+    """
+    from .. import db, paths
+    from ..canvas import catalogue
+    from ..models import Chapter
+    from .script import pictures_used
+
+    try:
+        with db.session() as conn:
+            row = db.get_script(conn, int(idea["id"]))
+        if row is None:
+            return []
+        chapters = [Chapter.from_dict(c) for c in json.loads(row["chapters_json"])]
+        return catalogue.credits(paths.ASSETS_DIR, pictures_used(chapters))
+    except Exception:  # noqa: BLE001 - a description must not fail over a credit line
+        return []
+
+
 def build_description(idea, sources, chapters_text: str, channel: dict, brand) -> str:
     """The description.
 
@@ -76,6 +99,10 @@ def build_description(idea, sources, chapters_text: str, channel: dict, brand) -
         for source in background:
             parts.append(f"[{source['ref']}] {source['title']} — {source['summary']}")
         parts.append("")
+
+    picture_credits = _picture_credits(idea)
+    if picture_credits:
+        parts += ["■ 素材", *picture_credits, ""]
 
     tags = json.loads(idea["tags_json"] or "[]")
     if tags:

@@ -834,11 +834,12 @@ def mentioned_pictures(text: str) -> list[tuple[str, str]]:
     Two-character words match as substrings; a one-character word only when
     it stands alone (「鐘」, not 重力波's 波, not 望遠鏡's 鏡).
     """
-    from ..canvas.illustrations import ILLUSTRATIONS
+    from .. import paths
+    from ..canvas import catalogue
 
     found: list[tuple[str, str]] = []
     covered: list[tuple[int, int]] = []
-    by_len = sorted(((jp, name) for name, (_, jp) in ILLUSTRATIONS.items() if jp), key=lambda x: -len(x[0]))
+    by_len = catalogue.japanese_index(paths.ASSETS_DIR)
     for jp, name in by_len:
         start = text.find(jp)
         while start != -1:
@@ -875,6 +876,40 @@ def _record_call(conn, response) -> None:
             output_tokens=response.output_tokens, cost_usd=response.cost_usd,
         )
         conn.commit()
+
+
+def pictures_used(chapters: list[Chapter]) -> list[str]:
+    """Every picture name the script places, for licence counting."""
+    names: list[str] = []
+    for chapter in chapters:
+        for line in chapter.lines:
+            for op in line.ops or []:
+                if op.get("op") in ("place", "add"):
+                    names.append(str(op.get("element", "")))
+                elif op.get("op") in ("steps", "cycle", "stack"):
+                    names += [str(entry).partition(":")[0] for entry in op.get("items", [])]
+                elif op.get("op") == "compare":
+                    names += [str(e) for e in op.get("elements", [])]
+    return [n for n in names if n]
+
+
+def check_licences(chapters: list[Chapter]) -> list[str]:
+    """Packs with a per-video limit — いらすとや's twenty — must not be
+    crossed. Counted in distinct pictures, as the terms count them."""
+    from .. import paths
+    from ..canvas import catalogue
+
+    limits = catalogue.limited(paths.ASSETS_DIR)
+    if not limits:
+        return []
+    counts = catalogue.count_by_pack(paths.ASSETS_DIR, pictures_used(chapters))
+    problems = []
+    for pack_id, limit in limits.items():
+        used = counts.get(pack_id, 0)
+        if used > limit:
+            problems.append(f"{pack_id} の絵を{used}種類使っている（無料で使えるのは1本{limit}種類まで）。"
+                            f"{used - limit}種類を Noto の絵か、コードで描く要素に置き換えること")
+    return problems
 
 
 def write_chapters(client, system: list[str], plan: list[dict[str, Any]], known_refs: set[str],
@@ -928,6 +963,7 @@ def write_chapters(client, system: list[str], plan: list[dict[str, Any]], known_
             hooks = [h for h in chapter.hooks if h.strip()][:3]
 
     script = Script(chapters=chapters, hooks=hooks)
+    notes += check_licences(chapters)
     lines = [line for c in chapters for line in c.lines]
     share = sum(1 for line in lines if line.speaker == "listener") / max(len(lines), 1)
     if not (LISTENER_SHARE[0] <= share <= LISTENER_SHARE[1]):

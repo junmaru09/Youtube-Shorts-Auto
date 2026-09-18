@@ -10,7 +10,9 @@ from __future__ import annotations
 
 from . import OPS, SLOTS
 from . import elements as E
-from . import illustrations as ILL
+from pathlib import Path
+
+from . import catalogue
 from . import style as S
 
 VISUAL_MANUAL = f"""\
@@ -66,7 +68,7 @@ VISUAL_MANUAL = f"""\
   - columns items=題:色:本文/改行|…                        部位=各題, 題.text
   - panel x=時間 y=高さ（空間） [warp=0.6]                  白い格子。部位=cell_c_r, origin
 - **絵**（話に出てくる物は、言葉の箱ではなく絵を置く）: `<名前> slot=… name=… [size=small|large]`
-{ILL.manual_lines()}
+{catalogue.manual_lines(Path(__file__).resolve().parents[3] / "assets")}
   例: 「物差し」の話なら `ruler slot=left name=r1`、「家」なら `house slot=right`。同じ絵を2つ置いて比べてもよい。
 
 ### 例（1行のセリフ＝1〜3操作）

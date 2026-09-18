@@ -51,7 +51,33 @@ python tools/sprite_export.py export ~/Downloads/ずんだもん立ち絵.psd as
 の3つ。レイヤーは `目/通常` のように `/` 区切りで指定し、一意ならレイヤー名だけでもよい。
 PSDTool の `!` `*` 接頭辞は無視して照合する。
 
-## illustrations/ — 図に置くイラスト
+## illustrations/ と packs/ — 図に置くイラスト
+
+絵は「パック」単位で管理する。同梱の Noto Emoji（216点、Apache-2.0、点数制限なし）に加えて、
+いらすとや等を手で足せる。パックの書式は [packs/README.md](packs/README.md)。
+
+### いらすとやを足す
+
+1. https://www.irasutoya.com/ から要る絵を保存する（**1本の動画で使えるのは20点まで無料**）。
+   台詞に出そうな語でファイル名を付けると楽（「驚く人」「望遠鏡をのぞく人」「鐘をつく人」）。
+   サイトが付ける「〜のイラスト」「（女性）」は自動で落ちる。
+2. まとめて登録:
+   ```bash
+   python tools/add_pictures.py ~/Downloads/irasutoya --pack irasutoya
+   ```
+   透明・白の余白を切り、512pxに縮めて `illustrations/` に置き、`packs/irasutoya.yaml` に
+   名前と日本語を書く。ファイル名が英語なら `--map ファイル名<TAB>英名<TAB>日本語` を渡す。
+3. `packs/irasutoya.yaml` の日本語を確認する。**台詞にその語が出たとき、その絵が置かれる**ので、
+   視聴者が言いそうな語にしておく。
+4. 以後は台本が自動で使い、20点を超える台本は差し戻される。概要欄のクレジットも自動。
+
+### 集めると効くもの（Emoji に無いもの）
+
+驚く人・考える人・困る人・指をさす人・説明する先生・実験する人・望遠鏡をのぞく人・
+鐘をつく人・望遠鏡と人・グラフを見る人・ひらめいた人・寝ている人・話し合う2人。
+物より**状況と表情**。物（鐘・寺・望遠鏡・物差し）は Emoji 側にある。
+
+
 
 同梱の101点は Noto Emoji（Apache-2.0）から `tools/fetch_illustrations.py` で512pxに書き出したもの。
 名前と日本語の対応は `src/tube_auto/canvas/illustrations.py`。足したいときはそこに1行足して再実行。

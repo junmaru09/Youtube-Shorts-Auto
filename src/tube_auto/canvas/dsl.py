@@ -20,7 +20,6 @@ from typing import Any
 
 from . import OPS
 from . import elements as E
-from . import illustrations as ILL
 
 __all__ = ["DSLError", "parse", "parse_many"]
 
@@ -53,6 +52,14 @@ _LIST_KEYS: dict[str, Any] = {
 }
 _COLUMN_ITEM = ("title", "colour", "text")
 _TEXT_KEYS = {"text", "note", "label", "title", "centre_label", "x", "y"}
+
+
+def _picture_names() -> set[str]:
+    from pathlib import Path
+
+    from . import catalogue
+
+    return set(catalogue.pictures(Path(__file__).resolve().parents[3] / "assets"))
 
 
 def _scalar(value: str) -> Any:
@@ -147,7 +154,7 @@ def parse(line: str) -> dict[str, Any]:
 
     if op in OPS:
         return {"op": op, **args}
-    if op in E.REGISTRY or op in ILL.ILLUSTRATIONS:
+    if op in E.REGISTRY or op in _picture_names():
         # element or illustration name as shorthand for `place element=<name>`
         return {"op": "place", "element": op, **args}
     raise DSLError(f"unknown operation {op!r} (ops: {', '.join(OPS)}; elements: {', '.join(sorted(E.REGISTRY))})")
