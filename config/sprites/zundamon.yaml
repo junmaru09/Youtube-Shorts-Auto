@@ -1,0 +1,18 @@
+# ずんだもん立ち絵素材V3.2_基本版.psd（坂本アヒル）用。
+# レイヤー名は `python tools/sprite_export.py list <psd>` の出力から。
+size: 900
+base:
+  - 体
+  - 右腕/腰
+  - 左腕/腰
+  - 枝豆/枝豆通常
+  - 顔色/ほっぺ基本
+expressions:
+  normal:    [目/基本目, 眉/基本眉]
+  happy:     [目/にっこり, 眉/基本眉]
+  surprised: [目/〇〇, 眉/上がり眉]
+  thinking:  [目/ジト目, 眉/困り眉]
+  sad:       [目/UU, 眉/困り眉]
+mouth:
+  closed: 口/むふ
+  open:   口/ほあー

@@ -1,0 +1,184 @@
+# 長尺（15〜20分）の科学解説チャンネルを1日1本、月5,000円以内で回すための設定。
+#
+# 目標: コストを差し引いて月30,000円。粗収益35,000円。
+# 最大の関門は収益化ゲート（直近12ヶ月で総再生時間4,000時間）で、
+# 実測ベースの逆算では約85本が必要になる。
+
+budget:
+  # 月次の総支出上限（USD）。画像生成・LLM・TTS超過分をすべて含む。
+  # ¥5,000 ≒ $33。実測の想定使用額は $8.8/月なので3倍以上の余裕がある。
+  monthly_usd: 33.0
+  # 1回の実行で使ってよい上限（USD）。暴走時のブレーキ。
+  per_run_usd: 3.0
+
+pipeline:
+  # 1日に企画する本数
+  ideas_per_day: 1
+  # 台本の出典検査に落ちた企画を作り直してよい回数。
+  # 1回の再試行が丸ごと1回分の課金なので、ここが無いと同じ企画に払い続ける。
+  max_retries_per_idea: 2
+
+# 投稿ペースのランプアップ。
+#
+# 開設直後にいきなり毎日投稿すると、視聴・登録の履歴がない新規アカウントは
+# スパムを疑われる。「改善なき大量投稿は逆効果」でもある。
+# 4,000時間の到達は2.8ヶ月→3.5ヶ月に遅れるが、凍結リスクを下げる方を取る。
+#
+# チャンネル開設から投稿開始までは2週間ほど空け、その間は普通に視聴・登録して
+# 履歴を作っておくこと。
+publish:
+  ramp_up:
+    - { until_day: 14, per_week: 3 }   # 1〜2週目
+    - { until_day: 28, per_week: 5 }   # 3〜4週目
+    - { until_day: null, per_week: 7 } # 以降は毎日
+  # API上限は 10,000 units/日、videos.insert が 1,600 units なので 6本/日。
+  hard_daily_cap: 6
+  initial_privacy: private
+  category_id: "28"  # Science & Technology
+  max_upload_failures: 3
+  # 開設日（YYYY-MM-DD）。ランプアップの起点。未設定なら最初の投稿日を使う。
+  channel_started_on: null
+
+video:
+  # 映像エンコーダ。auto は実際に1フレーム試し焼きして使えるものを選ぶ
+  # （ffmpegが「対応」と表示しても、そのGPUが刺さっているとは限らないため）。
+  #
+  #   auto        自動検出（既定）
+  #   libx264     CPU。どこでも動く。デスクトップCPUなら十分速い
+  #   h264_nvenc  NVIDIA（RTX 4070 Ti など）
+  #   h264_amf    AMD。Windowsのみ。AMF入りのffmpegビルドが要る（gyan.dev版など）
+  #   h264_qsv    Intel内蔵GPU
+  #
+  # AMD + Linux は VAAPI が本来の解だが、フィルタグラフ全体に hwupload を
+  # 入れる必要があるため未対応。libx264 のままになる。
+  encoder: auto
+  target_minutes: 15   # 台本1行が約33字なので、18分だと出力トークン上限に近づく。15分で約180行
+  width: 1920
+  height: 1080
+  fps: 30
+  # 素材の配分。NASAの動画在庫は7,559件と少なく、理論系（ブラックホール51件、
+  # 重力波3件）はすぐ枯渇するため、静止画と図解を主役にする。
+  # 静止画は166,793件あるので枯渇しない。
+  composition:
+    footage: 0.30   # NASA実映像。最も印象的な場面に絞る
+    still: 0.40     # NASA静止画 + Ken Burns
+    diagram: 0.25   # matplotlib アニメーション + 概念図
+    title: 0.05     # 章タイトル・オープニング
+  # 1カットの長さ（秒）。短すぎると散漫、長すぎると飽きる。
+  cut_seconds: { min: 6, max: 14 }
+
+research:
+  # 1本につきこの本数の一次ソースを束ねる。1本では内容が薄くなる。
+  sources_per_video: { min: 3, max: 5 }
+  # 直近この件数のソースURLを「使用済み」として除外する
+  recent_source_memory: 500
+  arxiv_max_age_days: 30
+  nasa_max_age_days: 365
+
+llm:
+  research_model: claude-sonnet-5
+  script_model: claude-sonnet-5
+  # 台本1本は display と spoken の2本立てで約14,000字＋JSON。Sonnet 5 は既定で
+  # 思考トークンも使い、それも max_tokens に含まれる。16000 では足りず、
+  # モデルが枠を察して短く書く（実測: 7,200字の指示に2,566字で返した）。
+  max_tokens: 32000
+  # 直近この件数の企画要約を渡して重複を避けさせる
+  recent_context_size: 40
+
+tts:
+  # voicevox: ずんだもん／四国めたん。ローカルの VOICEVOX ENGINE を使うので費用ゼロ。
+  # google:   Chirp 3 HD。月100万文字まで無料（フォールバック）。
+  provider: voicevox
+  voicevox:
+    # ENGINE の URL。Windows 版 VOICEVOX アプリを起動していればそこに立つ。
+    # WSL2 から Windows 側のアプリに繋ぐなら http://<Windowsのアドレス>:50021。
+    url: http://127.0.0.1:50021
+    # Linux 版 ENGINE（CPU 版でよい。GPU は要らない）を展開したフォルダ。
+    # 指定すると、URL が応答しないときにパイプラインが自分で起動して終了時に止める。
+    #   https://github.com/VOICEVOX/voicevox_engine/releases → voicevox_engine-linux-cpu-x64-*.7z
+    #   7z x voicevox_engine-linux-cpu-x64-*.7z -o$HOME/voicevox_engine
+    engine_dir: ~/voicevox_engine/linux-cpu-x64
+  # 話者ごとの音声（Google の音声名と VOICEVOX の話者ID）は brand.py の navigators で指定する。
+  language_code: ja-JP
+  sample_rate: 24000
+  free_tier_chars_per_month: 1000000
+  # 無料枠のこの割合を超えたら doctor が警告する
+  free_tier_warn_at: 0.8
+
+# 概念図の生成AI。
+#
+# NASAに素材がない理論系（事象の地平線の内側、重力波の伝わり方）を埋める。
+# matplotlib の4図解は定量的なので、「〜はどんな様子か」という絵は描けない。
+#
+# 既定はオフ。このパイプラインで唯一、使った分だけ費用が増える部分だから。
+# 1枚 $0.039。1本6枚なら $0.234、月30本で $7.0（¥1,050）。
+# 20枚まで増やすと月 $23.4 になり、台本の $8.55 と合わせて上限 $33 にほぼ届く。
+#
+# 有効にするには GEMINI_API_KEY を .env に入れて enabled: true にする。
+# キーが無ければ自動的にオフになり、図解だけで組み上がる。
+images:
+  enabled: false
+  provider: gemini
+  model: gemini-2.5-flash-image
+  # 1本の図解スロットのうち、AI生成に回す最大枚数。残りは matplotlib が描く。
+  concepts_per_video: 6
+
+# サムネイルに設定項目は無い。3案という数はYouTubeのTest & Compareの上限で、
+# 3案が何を主張するか（数値 / 問い / 主題）はコード側の設計。
+# その回のNASA静止画にテロップを焼くだけなので費用も発生しない。
+#   → src/tube_auto/stages/thumbnails.py
+
+postprocess:
+  font_path: null       # 未設定なら Noto Sans CJK を自動検出
+  loudness_target: -14.0
+  # BGMは YouTube オーディオライブラリから手で落として置く（ログインが要りAPIが無い）。
+  #
+  # 章ごとに曲を変えるため、雰囲気ごとのサブフォルダに分ける:
+  #   work/bgm/tension/     つかみ
+  #   work/bgm/wonder/      今日の話・本題
+  #   work/bgm/calm/        前提・詳しく
+  #   work/bgm/reflective/  何が覆ったか
+  #   work/bgm/resolve/     まとめ
+  #
+  # 各2〜3曲あれば足りる。サブフォルダを作らず直下に置いても動く（全章で同じ候補群を使う）。
+  # 1曲も無ければBGM無しで組み上がる。
+  bgm_dir: work/bgm
+  # ナレーションをキーにしたダッキング前の基準音量。
+  # 実測でダッキング量は7.7dB（放送で音楽を声の下に敷くときの標準域6〜10dB）。
+  bgm_gain_db: -22.0
+
+# 合成後の自動採点。基準未満でも動画は作るが、レビュー画面と CLI に理由を出し、
+# 投稿の前に直す。数値は参考チャンネル5本の実測（5〜13回/分、最長静止67〜133秒＝冒頭の部屋）から。
+quality:
+  min_changes_per_minute: 4
+  max_static_seconds: 40
+  max_three_row_subtitles: 0.05
+  max_dropped_visuals: 6
+  min_minutes: 8
+
+review:
+  reason_tags:
+    - 事実が怪しい
+    - 出典と内容が合っていない
+    - 読み間違いがある
+    - 映像と話が合っていない
+    - 図解が破綻している
+    - 冒頭が弱い
+    - 既出と似すぎ
+
+report:
+  # 収益化ゲート: 直近12ヶ月で総再生時間4,000時間
+  monetization_watch_hours: 4000
+  # 実測から逆算した必要本数
+  videos_to_gate: 85
+  # 目標: 手残り月30,000円 → 粗35,000円
+  target_gross_jpy: 35000
+  # RPMの初期値（円/1,000再生）。日本の長尺は150〜450円と幅が広いので、
+  # 初月の実測が出たらそちらで置き換える。
+  assumed_rpm_jpy: { low: 150, mid: 300, high: 450 }
+  jpy_per_usd: 150
+  # 各腕がこの本数に達するまでは配分を均等にし、判定も出さない
+  min_samples_before_weighting: 8
+  min_weight_share: 0.15
+  # 視聴維持率がこれを下回ったら構成に問題がある
+  retention_floor: 0.30

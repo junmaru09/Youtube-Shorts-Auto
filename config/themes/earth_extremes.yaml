@@ -1,0 +1,46 @@
+# 地球の極限環境。
+#
+# NASA動画（海洋355件、ハリケーン133件、気候190件、氷床38件）が使える。
+# 気候は政治的に敏感なので、観測事実に限定し政策論には踏み込まない。
+
+id: earth_extremes
+enabled: true
+languages: [ja]
+description: 地球で観測されている極端な現象と、その仕組み
+audience: 30〜50代・知的好奇心層。身近なスケールで科学を知りたい層
+
+nasa_queries:
+  - hurricane from space
+  - volcano eruption satellite
+  - ice sheet Greenland
+  - ocean current
+  - aurora from ISS
+
+# 動画は使わない。このテーマで通る映像は数件しかなく、
+# 画面に写っているものをメタデータから判定できない。
+allow_footage: false
+
+arxiv_categories: [physics.ao-ph]
+
+title_patterns:
+  ja:
+    - "{subject}はどうやって生まれるのか"
+    - "衛星が捉えた{subject}"
+    - "{subject}の仕組みを、観測データから"
+    - "{subject}、分かっていることと分かっていないこと"
+
+hashtags:
+  ja: ["#地球", "#科学", "#気象", "#解説"]
+
+topic_seeds:
+  - 台風の目がなぜ晴れるのか
+  - 深層循環が止まるとは何を意味するのか
+  - オーロラの色が高度で変わる理由
+  - 氷床の底で何が起きているか
+  - 火山灰が成層圏まで届くとき
+  - 海洋の熱がどこへ運ばれているか
+
+banned:
+  - 気候政策の是非に踏み込む
+  - 特定の災害の被害を煽る
+  - 一次ソースのない数値

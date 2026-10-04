@@ -1,0 +1,19 @@
+# 投稿先チャンネル。
+#
+# 1テーマ = 1視聴者層 = 1チャンネル。同じ動画を複数チャンネルに上げると
+# 再利用コンテンツ判定を受け、罰則はチャンネル全体に及ぶ。
+#
+# token_path は OAuth トークン JSON の置き場所。この環境は非対話なので、
+# ブラウザのあるマシンで `tube-auto auth --channel ja` を通して生成した
+# JSON を持ち込む（README 参照）。
+
+channels:
+  - id: ja
+    name: そらのしくみ
+    language: ja
+    token_path: config/oauth/token_ja.json
+    default_tags: ["宇宙", "科学", "解説"]
+    description_footer: |
+      チャンネル登録すると、新しい観測が出るたびに解説が届きます。
+
+client_secret_path: config/oauth/client_secret.json

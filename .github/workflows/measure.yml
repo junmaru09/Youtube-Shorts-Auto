@@ -1,0 +1,74 @@
+# Daily measurement.
+#
+# This one is scheduled where `daily.yml` is not, and the difference is
+# deliberate: building spends money and produces something a human must approve,
+# while measuring only reads. There is nothing to review and nothing to get
+# wrong.
+#
+# It also cannot be skipped without losing data. The analytics windows are 24h,
+# 72h and 7d, and a snapshot taken outside its window is not backfilled — it is
+# recorded as missed, because filing ten days of views under "24h" would corrupt
+# every comparison between themes. Miss enough days and the A/B has no data to
+# decide on, which is the whole reason the pipeline exists.
+#
+# Requires one secret: YOUTUBE_TOKEN_JA, the contents of config/oauth/token_ja.json
+# produced by `tube-auto auth --channel ja` on a machine with a browser.
+
+name: measure
+
+on:
+  schedule:
+    - cron: "0 22 * * *"   # 07:00 JST, after the day's views have settled
+  workflow_dispatch:
+
+concurrency:
+  group: tube-auto-measure
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Without the token there is nothing to read, and a run that fails every
+    # night trains everyone to ignore the notifications.
+    if: ${{ github.repository_owner != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the package
+        run: pip install -e "."
+
+      - name: Restore pipeline state
+        uses: actions/cache@v4
+        with:
+          path: work
+          key: tube-auto-state-${{ github.run_id }}
+          restore-keys: tube-auto-state-
+
+      - name: Place the OAuth token
+        env:
+          TOKEN: ${{ secrets.YOUTUBE_TOKEN_JA }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::warning::YOUTUBE_TOKEN_JA is not set; nothing to measure."
+            echo "skip=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          mkdir -p config/oauth
+          printf '%s' "$TOKEN" > config/oauth/token_ja.json
+
+      - name: Pull the view counts
+        if: ${{ env.skip != 'true' }}
+        run: tube-auto sync-stats
+
+      - name: Where the channel stands
+        if: ${{ env.skip != 'true' }}
+        run: tube-auto report
+
+      - name: Remove the token
+        if: always()
+        run: rm -f config/oauth/token_ja.json

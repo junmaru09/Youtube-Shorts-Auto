@@ -1,0 +1,34 @@
+[project]
+name = "tube-auto"
+version = "0.1.0"
+description = "Automated long-form YouTube pipeline: research -> script -> narrate -> assemble -> review -> publish -> measure"
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic>=0.40.0",              # research and script generation
+    "google-cloud-texttospeech>=2.16", # narration (Chirp 3 HD, 1M chars/month free)
+    "google-api-python-client>=2.150.0",  # YouTube Data and Analytics
+    "google-auth-oauthlib>=1.2.0",
+    "matplotlib>=3.9",                # animated diagrams
+    "Pillow>=10.0",                   # the whiteboard canvas
+    "PyYAML>=6.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+review = ["streamlit>=1.40.0"]
+dev = ["pytest>=8.0.0", "numpy>=1.26", "psd-tools>=1.10"]
+sprites = ["psd-tools>=1.10"]      # tools/sprite_export.py
+
+[project.scripts]
+tube-auto = "tube_auto.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

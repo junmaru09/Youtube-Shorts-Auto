@@ -1,0 +1,66 @@
+# チャンネルの見た目と声。
+#
+#   cp config/brand.yaml.example config/brand.yaml
+#
+# このファイルが無ければ src/tube_auto/brand.py の既定値が使われる。ここに書いた
+# キーだけが上書きされるので、変えたい項目だけ残して他は消してよい。
+#
+# 2026年1月の収益化停止は「形式ではなく、運用と見え方、チャンネル独自のブランドが
+# あるかどうか」で判断されていた。避けるべきは「ゆっくり解説に見えること」ではなく
+# 「ブランドが無いこと」。だからこのファイルは飾りではない。
+
+channel_name: そらのしくみ
+tagline: 宇宙と地球を、一次情報から。
+
+# 毎回必ず触れる問い。これがこのチャンネル固有の視点になる。
+# まとめ系がやらないのは「何が覆されたか」を言うこと。
+signature_question: この発見は、それまでの何を覆したか
+
+# 毎回同じ締め。視聴者が「このチャンネルだ」と分かる手がかり。
+closing_line: 今日の話のもとになった論文と資料は、概要欄にすべて置いてあります。
+
+# 固定ナビゲーター2名。
+#
+# 音声は必ず試聴してから決めること。20分間ずっと聞く声なので、ここの違和感は
+# 視聴維持率に直結する。Chirp 3 HD は ja-JP で28音声から選べる。
+#   gcloud ml speech ... ではなく、Cloud Console の Text-to-Speech から試聴が早い。
+#
+# 完全な対話はLLMの脚本が不自然になりやすく、完全な単独は単調なので折衷にしてある。
+# 聞き役は章の切り替えと難所で1〜2文だけ質問し、相槌は打たない。
+navigators:
+  explainer:
+    name: カナタ
+    persona: 落ち着いた解説役。断定を避け、分かっていないことは分かっていないと言う。
+    voice: ja-JP-Chirp3-HD-Charon
+    speaking_rate: 1.0
+  listener:
+    name: ミオ
+    persona: 聞き役。視聴者が引っかかるところで短く一度だけ質問する。相槌は打たない。
+    voice: ja-JP-Chirp3-HD-Aoede
+    speaking_rate: 1.02
+
+# 図解・章タイトル・サムネイルが共有する配色。
+# 暗い背景に1色のアクセント、というのは figure と写真の両方に載せられる数少ない構成。
+palette:
+  bg: "#05070F"      # 背景
+  ink: "#FFFFFF"     # 本文
+  accent: "#FFD34D"  # 強調（1色に絞ること。増やすと図解が散らかる）
+  sub: "#9FB4D8"     # 補助ラベル
+  grid: "#1E2A44"    # 目盛り
+
+# null なら Noto Sans CJK を自動検出する。
+font_path: null
+
+telop:
+  keyword_size: 64
+  subtitle_size: 52
+  chapter_size: 88
+  border: 6
+
+# 概要欄の先頭に固定される2行。順番に意味がある。
+#
+# YouTubeは概要欄を視聴ページ以外では省略するので、誰も見ない位置のクレジットは
+# クレジットではない。NASAは「推奨を示唆しないこと」を条件にしているため、
+# 非提携の一文は必須。
+disclosure: ※この動画のナレーションと図解は生成AIで制作しています。
+credit_line: "Video / Images: NASA (public domain). NASAは本チャンネルを推奨していません。"

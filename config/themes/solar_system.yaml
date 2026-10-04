@@ -1,0 +1,47 @@
+# 太陽系の極限。
+#
+# NASA動画が最も豊富な領域（Mars 1,619件、Jupiter 237件、Saturn 113件、
+# 探査車 269件）。実写映像を主役にできる数少ないテーマ。
+
+id: solar_system
+enabled: true
+languages: [ja]
+description: 太陽系の中で起きている極端な現象と、探査機が見たもの
+audience: 30〜50代・知的好奇心層。探査ミッションの実際が知りたい層
+
+nasa_queries:
+  - Mars rover
+  - Jupiter Juno
+  - Saturn Cassini
+  - Europa Enceladus
+  - Venus atmosphere
+  - asteroid sample return
+
+# NASAの実映像を使う。探査機・打ち上げ・ISSは在庫が多く素性も明確。
+allow_footage: true
+
+arxiv_categories: [astro-ph.EP]
+
+title_patterns:
+  ja:
+    - "探査機が見た{subject}の実際"
+    - "{subject}で何が起きているのか"
+    - "{subject}の地下に何があるか"
+    - "{subject}、教科書が書き換わった部分"
+
+hashtags:
+  ja: ["#宇宙", "#太陽系", "#探査機", "#解説"]
+
+topic_seeds:
+  - エウロパの氷の下の海をどうやって確かめるのか
+  - 金星の上空に生命がいるという議論の現在
+  - 火星のメタンが増減する謎
+  - 木星の大赤斑が縮んでいる理由
+  - 土星の環はいつ消えるのか
+  - 小惑星サンプルから何が分かったか
+  - タイタンの液体メタンの湖
+
+banned:
+  - 探査計画の予定を確定事項として語る
+  - 生命の存在を断定する
+  - 一次ソースのない数値
